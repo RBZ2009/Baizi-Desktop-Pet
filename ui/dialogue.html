@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'">
+<title>白子 · 对话与记忆</title><link rel="stylesheet" href="dialogue.css"></head>
+<body><header><h1>对话与记忆</h1><p>白子的人设与记忆在本机管理，回复由你配置的模型 API 生成。</p></header>
+<nav><button data-tab="settings" class="selected">模型设置</button><button data-tab="memories">长期记忆</button><button data-tab="history">会话历史</button></nav>
+<p id="notice" role="status"></p>
+<section id="settings">
+<form id="settings-form">
+<label>API Base URL<input id="baseUrl" type="url" required></label>
+<p class="hint">填写兼容接口的基础地址（通常以 /v1 结尾）。</p>
+<label>对话模型<input id="model" required></label>
+<label>API Key<input id="apiKey" type="password" autocomplete="off" placeholder="留空保留已有 Key"></label>
+<label class="check"><input id="clearApiKey" type="checkbox">清除已保存的 API Key</label>
+<div class="grid"><label>上下文窗口（tokens）<input id="contextWindow" type="number" min="4096" max="1000000" required></label><label>回复上限（tokens）<input id="maxOutputTokens" type="number" min="128" max="32768" required></label></div>
+<div class="grid"><label>温度<input id="temperature" type="number" min="0" max="2" step="0.1" required></label><label>超时（秒）<input id="timeoutSeconds" type="number" min="1" max="300" required></label></div>
+<label>记忆提取模型<input id="memoryModel" placeholder="留空使用对话模型"></label>
+<label class="check"><input id="autoMemory" type="checkbox">自动提取值得长期记住的信息</label>
+<label class="check"><input id="ttsEnabled" type="checkbox">使用 macOS 系统语音播报回复</label>
+<div class="grid"><label>系统声音<input id="ttsVoice" placeholder="Tingting"></label><label>语速（每分钟字数）<input id="ttsRate" type="number" min="80" max="400" required></label></div>
+<p class="hint">API Key 使用系统安全存储加密。选入上下文的对话和记忆会发送给模型供应商。</p>
+<div class="actions"><button type="submit">保存设置</button><button id="test-model" type="button">测试模型连接</button></div>
+</form></section>
+<section id="memories" hidden><p>长期记忆将在下一开发步骤接入。</p></section>
+<section id="history" hidden><p>会话管理将在下一开发步骤接入。</p></section>
+<script src="dialogue.js"></script></body></html>

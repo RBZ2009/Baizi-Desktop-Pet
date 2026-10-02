@@ -1,7 +1,11 @@
+/**
+ * Responsibility: Manage desktop pet windows, interactions and the local gateway bridge.
+ * Implementation: 1. Preserve VRM controls. 2. Delegate dialogue to a managed utility process. 3. Expose only bounded IPC operations.
+ */
 const { app, BrowserWindow, ipcMain, Menu, Tray, screen, nativeImage, dialog } = require('electron');
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { GatewayManager } = require('./gateway-manager');
 
 let mainWindow;
 let speechWindow = null;
@@ -58,199 +62,28 @@ const defaultConfig = {
   }
 };
 
-function getCozeConfig() {
-  const config = loadConfig();
-  return {
-    endpoint: config?.coze?.endpoint || defaultConfig.coze.endpoint,
-    token: config?.coze?.token || process.env.DESKTOP_PET_COZE_TOKEN || '',
-    userId: config?.coze?.userId || '',
-    password: config?.coze?.password || '',
-    sessionId: config?.coze?.sessionId || defaultConfig.coze.sessionId,
-    projectId: config?.coze?.projectId || defaultConfig.coze.projectId,
-    aliyunApiKey: config?.coze?.aliyunApiKey || '',
-    aliyunBaseUrl: config?.coze?.aliyunBaseUrl || defaultConfig.coze.aliyunBaseUrl,
-    aliyunRegion: config?.coze?.aliyunRegion || defaultConfig.coze.aliyunRegion,
-    aliyunTtsModel: config?.coze?.aliyunTtsModel || defaultConfig.coze.aliyunTtsModel,
-    aliyunTtsVoice: config?.coze?.aliyunTtsVoice || defaultConfig.coze.aliyunTtsVoice,
-    aliyunTtsInstructions: config?.coze?.aliyunTtsInstructions || defaultConfig.coze.aliyunTtsInstructions,
-    aliyunOptimizeInstructions: typeof config?.coze?.aliyunOptimizeInstructions === 'boolean'
-      ? config.coze.aliyunOptimizeInstructions
-      : defaultConfig.coze.aliyunOptimizeInstructions,
-    ttsMuted: typeof config?.coze?.ttsMuted === 'boolean' ? config.coze.ttsMuted : defaultConfig.coze.ttsMuted
-  };
-}
-
+// Read visual preferences independently from gateway data and credentials.
 function loadConfig() {
   try {
-    if (!fs.existsSync(configPath)) return { ...defaultConfig };
-    const raw = fs.readFileSync(configPath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    return {
-      ...defaultConfig,
-      ...parsed
-    };
-  } catch (_) {
-    return { ...defaultConfig };
-  }
+    if (!fs.existsSync(configPath)) return structuredClone(defaultConfig);
+    return { ...structuredClone(defaultConfig), ...JSON.parse(fs.readFileSync(configPath, 'utf8')) };
+  } catch { return structuredClone(defaultConfig); }
 }
 
+// Atomically save preferences and report failures to callers.
 function saveConfig(config) {
-  try {
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-  } catch (_) {
-    // ignore file errors
-  }
+  const temporary = `${configPath}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(config, null, 2), { mode: 0o600 });
+  fs.renameSync(temporary, configPath);
 }
 
-function appendChatHistory(userText, assistantText) {
-  const cfg = loadConfig();
-  const history = Array.isArray(cfg.chatHistory) ? cfg.chatHistory : [];
-  history.push({
-    user: String(userText || '').trim(),
-    assistant: String(assistantText || '').trim(),
-    createdAt: Date.now()
-  });
-  const trimmed = history.slice(-20);
-  saveConfig({ ...cfg, chatHistory: trimmed });
+let gatewayManager = null;
+let activeDialogue = null;
+// Create the gateway manager after Electron is ready so safeStorage is available.
+function getGateway() {
+  if (!gatewayManager) gatewayManager = new GatewayManager(app.getPath('userData'), loadConfig().chatHistory || []);
+  return gatewayManager;
 }
-
-
-const ttsRealtimeState = {
-  child: null,
-  buffer: '',
-  ended: false,
-  lastSampleRate: 24000,
-  requestId: null
-};
-
-let ttsFlowChild = null;
-
-function parseTtsRealtimeLines(state, onEvent) {
-  let idx;
-  while ((idx = state.buffer.indexOf('\n')) >= 0) {
-    const line = state.buffer.slice(0, idx).trim();
-    state.buffer = state.buffer.slice(idx + 1);
-    if (!line) continue;
-    let payload = null;
-    try {
-      payload = JSON.parse(line);
-    } catch (_) {
-      // ignore malformed line
-      continue;
-    }
-    if (payload?.type) {
-      onEvent(payload);
-    }
-  }
-}
-
-function stopTtsRealtimeProcess() {
-  if (ttsRealtimeState.child) {
-    try {
-      ttsRealtimeState.child.kill();
-    } catch (_) {
-      // ignore kill error
-    }
-  }
-  ttsRealtimeState.child = null;
-  ttsRealtimeState.buffer = '';
-  ttsRealtimeState.ended = false;
-  ttsRealtimeState.lastSampleRate = 24000;
-}
-
-function runTtsFlowList(textList, apiKey, region) {
-  if (!Array.isArray(textList) || textList.length === 0) return;
-
-  const url = region === 'singapore'
-    ? 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime?model=qwen3-tts-flash-realtime'
-    : 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3-tts-flash-realtime';
-
-  const env = {
-    ...process.env,
-    DASHSCOPE_API_KEY: apiKey,
-    TTS_REALTIME_URL: url,
-    PYTHONIOENCODING: 'utf-8',
-    PYTHONUTF8: '1'
-  };
-
-  const payload = JSON.stringify(textList);
-  const logPath = path.join(__dirname, 'tts_use_payload.log');
-  try {
-    fs.writeFileSync(logPath, '', { flag: 'a', encoding: 'utf-8' });
-    fs.appendFileSync(logPath, `${new Date().toISOString()} runTtsFlowList_payload=${payload}\n`, 'utf-8');
-  } catch (_) {
-    // ignore log errors
-  }
-
-  const pythonCode = [
-    'import json, sys',
-    'from tts_flow import use',
-    'use(json.loads(sys.argv[1]))'
-  ].join('; ');
-
-  const errLogPath = path.join(__dirname, 'tts_use_error.log');
-
-  if (ttsFlowChild) {
-    try {
-      ttsFlowChild.kill();
-    } catch (_) {
-      // ignore kill error
-    }
-    ttsFlowChild = null;
-  }
-
-  const spawnWithCommand = (command) => {
-    try {
-      fs.writeFileSync(errLogPath, '', { flag: 'a', encoding: 'utf-8' });
-      fs.appendFileSync(errLogPath, `${new Date().toISOString()} spawn_${command}\n`, 'utf-8');
-    } catch (_) {
-      // ignore log errors
-    }
-
-    const child = spawn(command, ['-c', pythonCode, payload], {
-      cwd: __dirname,
-      windowsHide: true,
-      env
-    });
-
-    ttsFlowChild = child;
-
-    child.stderr.on('data', (chunk) => {
-      const msg = String(chunk || '');
-      if (!msg) return;
-      try {
-        fs.appendFileSync(errLogPath, `${new Date().toISOString()} ${msg}\n`, 'utf-8');
-      } catch (_) {
-        // ignore log errors
-      }
-    });
-
-    child.on('error', (err) => {
-      try {
-        fs.appendFileSync(errLogPath, `${new Date().toISOString()} spawn_error=${String(err?.message || err)}\n`, 'utf-8');
-      } catch (_) {
-        // ignore log errors
-      }
-      if (command === 'python') {
-        spawnWithCommand('py');
-      }
-    });
-
-    child.on('close', (code) => {
-      try {
-        fs.appendFileSync(errLogPath, `${new Date().toISOString()} exit_code=${code}\n`, 'utf-8');
-      } catch (_) {
-        // ignore log errors
-      }
-      if (ttsFlowChild === child) {
-        ttsFlowChild = null;
-      }
-    });
-  };
-
-  spawnWithCommand('python');
-}
-
 
 function getSizePreset(mode, config = loadConfig()) {
   const fallback = sizePresets[mode] || sizePresets.medium;
@@ -633,6 +466,7 @@ function openSizeScaleSettingsWindow() {
       const v = Number(document.getElementById(id).value);
       return Number.isFinite(v) && v > 0 ? v : fallback;
     };
+    document.getElementById('openDialogue').addEventListener('click',()=>ipcRenderer.invoke('gateway-open'));
     document.getElementById('cancelBtn').addEventListener('click', () => window.close());
     document.getElementById('saveBtn').addEventListener('click', async () => {
       await ipcRenderer.invoke('pet-save-size-scale-overrides', {
@@ -641,101 +475,6 @@ function openSizeScaleSettingsWindow() {
         large: getNum('large', 1)
       });
       window.close();
-    });
-  </script>
-</body>
-</html>`;
-
-  win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-}
-
-function openAISettingsWindow() {
-  const config = loadConfig();
-  const coze = {
-    endpoint: config?.coze?.endpoint || defaultConfig.coze.endpoint,
-    token: config?.coze?.token || '',
-    sessionId: config?.coze?.sessionId || defaultConfig.coze.sessionId,
-    projectId: config?.coze?.projectId || defaultConfig.coze.projectId
-  };
-
-  const win = new BrowserWindow({
-    width: 520,
-    height: 420,
-    title: 'AI 设置',
-    resizable: false,
-    minimizable: false,
-    maximizable: false,
-    autoHideMenuBar: true,
-    alwaysOnTop: true,
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
-    }
-  });
-
-  const safe = (v) => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-
-  const html = `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <title>AI 设置</title>
-  <style>
-    body{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto; margin:0; background:#0f172a; color:#e2e8f0;}
-    .wrap{padding:16px; display:flex; flex-direction:column; gap:10px;}
-    label{font-size:12px; color:#cbd5e1;}
-    input{width:100%; box-sizing:border-box; padding:8px 10px; border-radius:8px; border:1px solid #334155; background:#0b1220; color:#f8fafc;}
-    .row{display:flex; gap:10px;}
-    .row > div{flex:1;}
-    .btns{display:flex; justify-content:flex-end; gap:8px; margin-top:8px;}
-    button{border:none; border-radius:8px; padding:8px 12px; cursor:pointer;}
-    .save{background:#4f46e5; color:white;}
-    .cancel{background:#334155; color:#e2e8f0;}
-    .hint{font-size:12px; color:#94a3b8;}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <div class="hint">填写 Coze 智能体配置。Token 仅保存在本机配置文件。</div>
-    <div>
-      <label>Endpoint</label>
-      <input id="endpoint" value="${safe(coze.endpoint)}" />
-    </div>
-    <div>
-      <label>Token</label>
-      <input id="token" value="${safe(coze.token)}" />
-    </div>
-    <div class="row">
-      <div>
-        <label>Session ID</label>
-        <input id="sessionId" value="${safe(coze.sessionId)}" />
-      </div>
-      <div>
-        <label>Project ID</label>
-        <input id="projectId" value="${safe(coze.projectId)}" />
-      </div>
-    </div>
-    <div class="btns">
-      <button class="cancel" id="cancelBtn">取消</button>
-      <button class="save" id="saveBtn">保存</button>
-    </div>
-  </div>
-  <script>
-    const endpoint = document.getElementById('endpoint');
-    const token = document.getElementById('token');
-    const sessionId = document.getElementById('sessionId');
-    const projectId = document.getElementById('projectId');
-
-    document.getElementById('cancelBtn').addEventListener('click', () => window.close());
-    document.getElementById('saveBtn').addEventListener('click', () => {
-      const payload = {
-        endpoint: endpoint.value.trim(),
-        token: token.value.trim(),
-        sessionId: sessionId.value.trim(),
-        projectId: Number(projectId.value.trim())
-      };
-      const ipc = require('electron').ipcRenderer;
-      ipc.invoke('pet-save-coze-config', payload).then(() => window.close());
     });
   </script>
 </body>
@@ -797,7 +536,7 @@ function openPreferencesWindow() {
     <label>呼吸效果</label>
     <select id="breathingMode"><option value="off">关闭</option><option value="subtle">轻微</option><option value="normal">标准</option></select>
   </div>
-  <div id="ai" class="panel"><div class="row"><div><label>Endpoint</label><input id="endpoint" value="${safe(config?.coze?.endpoint || defaultConfig.coze.endpoint)}"></div></div><div><label>Token</label><input id="token" value="${safe(config?.coze?.token || '')}"></div><div class="row"><div><label>用户 ID（user_id）</label><input id="userId" value="${safe(config?.coze?.userId || '')}"></div><div><label>身份密码（password）</label><input id="cozePassword" value="${safe(config?.coze?.password || '')}"></div></div><div class="row"><div><label>阿里云 API Key</label><input id="aliyunApiKey" value="${safe(config?.coze?.aliyunApiKey || '')}"></div><div><label>地域</label><select id="aliyunRegion"><option value="beijing">北京（cn）</option><option value="singapore">新加坡（intl）</option></select></div></div><div class="row"><div><label>阿里云 Base URL（可留空自动匹配地域）</label><input id="aliyunBaseUrl" value="${safe(config?.coze?.aliyunBaseUrl || '')}"></div></div><div class="row"><div><label>TTS Model</label><select id="aliyunTtsModel"><option value="qwen3-tts-flash">qwen3-tts-flash</option><option value="qwen3-tts-instruct-flash">qwen3-tts-instruct-flash</option></select></div><div><label>Voice</label><input id="aliyunTtsVoice" value="${safe(config?.coze?.aliyunTtsVoice || defaultConfig.coze.aliyunTtsVoice)}"></div></div><div><label>Instructions（可选）</label><input id="aliyunTtsInstructions" value="${safe(config?.coze?.aliyunTtsInstructions || '')}"></div><div><label><input id="aliyunOptimizeInstructions" type="checkbox"> optimize_instructions</label></div><div><label><input id="ttsMuted" type="checkbox"> 静音模式（仅显示文字）</label></div><div class="row"><div><label>Session ID</label><input id="sessionId" value="${safe(config?.coze?.sessionId || defaultConfig.coze.sessionId)}"></div><div><label>Project ID</label><input id="projectId" value="${safe(config?.coze?.projectId || defaultConfig.coze.projectId)}"></div></div><div class="hint">输出框位置（相对角色窗口，X/Y 建议 0.0~1.0）</div><div class="row"><div><label>输出框锚点 X</label><input id="bubbleAnchorX" type="number" step="0.01" value="${safe(config?.coze?.bubbleAnchorX ?? defaultConfig.coze.bubbleAnchorX)}"></div><div><label>输出框锚点 Y</label><input id="bubbleAnchorY" type="number" step="0.01" value="${safe(config?.coze?.bubbleAnchorY ?? defaultConfig.coze.bubbleAnchorY)}"></div></div><div><label><input id="bubbleAutoClose" type="checkbox"> 对话泡自动关闭</label></div><div><label>每字符停留时长（毫秒）</label><input id="bubblePerCharMs" type="number" step="10" min="10" value="${safe(config?.coze?.bubblePerCharMs ?? defaultConfig.coze.bubblePerCharMs)}"></div><div><label>每行字符数</label><input id="charsPerLine" type="number" step="1" min="5" value="${safe(config?.coze?.charsPerLine ?? defaultConfig.coze.charsPerLine)}"></div></div>
+  <div id="ai" class="panel"><button id="openDialogue">打开对话与记忆设置</button><div class="hint">配置模型 API、自动记忆和系统语音。</div><div class="row"><div><label>气泡锚点 X</label><input id="bubbleAnchorX" type="number" step="0.01" value="${safe(config?.coze?.bubbleAnchorX ?? 0.56)}"></div><div><label>气泡锚点 Y</label><input id="bubbleAnchorY" type="number" step="0.01" value="${safe(config?.coze?.bubbleAnchorY ?? 0.34)}"></div></div><label><input id="bubbleAutoClose" type="checkbox">气泡自动关闭</label><label>每字符停留时间（毫秒）<input id="bubblePerCharMs" type="number" min="10" value="${safe(config?.coze?.bubblePerCharMs ?? 180)}"></label><label>每行字符数<input id="charsPerLine" type="number" min="5" value="${safe(config?.coze?.charsPerLine ?? 15)}"></label></div>
   <div id="general" class="panel"><label><input id="autoLaunch" type="checkbox"> 开机自启动</label><label><input id="showPetBounds" type="checkbox"> 显示角色容器边界（调试）</label><div class="row"><div><label>时区（UTC+）</label><input id="timeZone" type="number" step="1" value="${safe(config?.coze?.timeZone ?? defaultConfig.coze.timeZone)}"></div></div><div class="hint">例如 8 表示 UTC+8。</div></div>
   <div class="btns"><button class="cancel" id="cancelBtn">取消</button><button class="save" id="saveBtn">保存</button></div>
   <script>
@@ -809,11 +548,8 @@ function openPreferencesWindow() {
     document.getElementById('autoLaunch').checked = !!cfg.autoLaunch;
     document.getElementById('showPetBounds').checked = !!cfg.showPetBounds;
     document.getElementById('bubbleAutoClose').checked = (cfg?.coze?.bubbleAutoClose ?? true) !== false;
-    document.getElementById('aliyunRegion').value = cfg?.coze?.aliyunRegion || 'beijing';
-    document.getElementById('aliyunTtsModel').value = cfg?.coze?.aliyunTtsModel || 'qwen3-tts-flash';
-    document.getElementById('aliyunOptimizeInstructions').checked = (cfg?.coze?.aliyunOptimizeInstructions ?? true) !== false;
-    document.getElementById('ttsMuted').checked = !!cfg?.coze?.ttsMuted;
     document.querySelectorAll('.tab').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.getElementById(btn.dataset.panel).classList.add('active');}));
+    document.getElementById('openDialogue').addEventListener('click',()=>ipcRenderer.invoke('gateway-open'));
     document.getElementById('cancelBtn').addEventListener('click',()=>window.close());
     document.getElementById('saveBtn').addEventListener('click', async ()=>{
       const payload = {
@@ -833,20 +569,6 @@ function openPreferencesWindow() {
           large: Number(document.getElementById('scLarge').value) || 1
         },
         coze: {
-          endpoint: document.getElementById('endpoint').value.trim(),
-          token: document.getElementById('token').value.trim(),
-          userId: document.getElementById('userId').value.trim(),
-          password: document.getElementById('cozePassword').value.trim(),
-          aliyunApiKey: document.getElementById('aliyunApiKey').value.trim(),
-          aliyunBaseUrl: document.getElementById('aliyunBaseUrl').value.trim(),
-          aliyunRegion: document.getElementById('aliyunRegion').value,
-          aliyunTtsModel: document.getElementById('aliyunTtsModel').value,
-          aliyunTtsVoice: document.getElementById('aliyunTtsVoice').value.trim(),
-          aliyunTtsInstructions: document.getElementById('aliyunTtsInstructions').value.trim(),
-          aliyunOptimizeInstructions: document.getElementById('aliyunOptimizeInstructions').checked,
-          ttsMuted: document.getElementById('ttsMuted').checked,
-          sessionId: document.getElementById('sessionId').value.trim(),
-          projectId: Number(document.getElementById('projectId').value),
           bubbleAnchorX: Number(document.getElementById('bubbleAnchorX').value),
           bubbleAnchorY: Number(document.getElementById('bubbleAnchorY').value),
           bubbleAutoClose: document.getElementById('bubbleAutoClose').checked,
@@ -907,7 +629,7 @@ function buildControlMenuTemplate() {
     { label: '显示桌宠', click: () => showPetWindow() },
     { label: isPaused ? '恢复运行（快速启动）' : '暂停桌宠', click: () => setPaused(!isPaused) },
     { label: '偏好设置', click: () => openPreferencesWindow() },
-    { label: '对话历史', click: () => openChatHistoryWindow() },
+    { label: '对话与记忆', click: () => getGateway().openWindow() },
     { type: 'separator' },
     { label: '退出', click: () => app.quit() }
   ];
@@ -1057,32 +779,6 @@ ipcMain.handle('pet-save-preferences', async (_event, payload) => {
       large: sanitize(payload?.sizeScaleOverrides?.large)
     },
     coze: {
-      endpoint: String(payload?.coze?.endpoint || current?.coze?.endpoint || defaultConfig.coze.endpoint).trim(),
-      token: String(payload?.coze?.token || '').trim(),
-      userId: String(payload?.coze?.userId || current?.coze?.userId || '').trim(),
-      password: String(payload?.coze?.password || current?.coze?.password || '').trim(),
-      aliyunApiKey: String(payload?.coze?.aliyunApiKey || current?.coze?.aliyunApiKey || '').trim(),
-      aliyunBaseUrl: String(payload?.coze?.aliyunBaseUrl || current?.coze?.aliyunBaseUrl || '').trim(),
-      aliyunRegion: ['beijing', 'singapore'].includes(String(payload?.coze?.aliyunRegion || ''))
-        ? String(payload.coze.aliyunRegion)
-        : (current?.coze?.aliyunRegion || defaultConfig.coze.aliyunRegion),
-      aliyunTtsModel: ['qwen3-tts-flash', 'qwen3-tts-instruct-flash'].includes(String(payload?.coze?.aliyunTtsModel || ''))
-        ? String(payload.coze.aliyunTtsModel)
-        : (current?.coze?.aliyunTtsModel || defaultConfig.coze.aliyunTtsModel),
-      aliyunTtsVoice: String(payload?.coze?.aliyunTtsVoice || current?.coze?.aliyunTtsVoice || defaultConfig.coze.aliyunTtsVoice).trim() || defaultConfig.coze.aliyunTtsVoice,
-      aliyunTtsInstructions: String(payload?.coze?.aliyunTtsInstructions || current?.coze?.aliyunTtsInstructions || '').trim(),
-      aliyunOptimizeInstructions: typeof payload?.coze?.aliyunOptimizeInstructions === 'boolean'
-        ? payload.coze.aliyunOptimizeInstructions
-        : (typeof current?.coze?.aliyunOptimizeInstructions === 'boolean'
-          ? current.coze.aliyunOptimizeInstructions
-          : defaultConfig.coze.aliyunOptimizeInstructions),
-      ttsMuted: typeof payload?.coze?.ttsMuted === 'boolean'
-        ? payload.coze.ttsMuted
-        : (typeof current?.coze?.ttsMuted === 'boolean'
-          ? current.coze.ttsMuted
-          : defaultConfig.coze.ttsMuted),
-      sessionId: String(payload?.coze?.sessionId || current?.coze?.sessionId || defaultConfig.coze.sessionId).trim(),
-      projectId: Number(payload?.coze?.projectId) || current?.coze?.projectId || defaultConfig.coze.projectId,
       bubbleAnchorX: Number.isFinite(Number(payload?.coze?.bubbleAnchorX)) ? Number(payload.coze.bubbleAnchorX) : (current?.coze?.bubbleAnchorX ?? defaultConfig.coze.bubbleAnchorX),
       bubbleAnchorY: Number.isFinite(Number(payload?.coze?.bubbleAnchorY)) ? Number(payload.coze.bubbleAnchorY) : (current?.coze?.bubbleAnchorY ?? defaultConfig.coze.bubbleAnchorY),
       bubbleAutoClose: typeof payload?.coze?.bubbleAutoClose === 'boolean' ? payload.coze.bubbleAutoClose : (current?.coze?.bubbleAutoClose ?? true),
@@ -1117,495 +813,48 @@ ipcMain.handle('pet-restart-app', async () => {
   return { ok: true };
 });
 
-function extractTextFromAny(value) {
-  if (value == null) return '';
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const t = extractTextFromAny(item);
-      if (t) return t;
-    }
-    return '';
-  }
-  if (typeof value === 'object') {
-    const commonKeys = ['answer', 'text', 'content', 'message', 'output', 'response'];
-    for (const key of commonKeys) {
-      if (key in value) {
-        const t = extractTextFromAny(value[key]);
-        if (t) return t;
-      }
-    }
-    for (const key of Object.keys(value)) {
-      const t = extractTextFromAny(value[key]);
-      if (t) return t;
-    }
-  }
-  return '';
+// Restrict settings and database controls to the sandboxed management page.
+function requireManagementSender(event) {
+  const expected = require('node:url').pathToFileURL(path.join(__dirname, 'ui/dialogue.html')).href;
+  if (event.senderFrame?.url !== expected) throw new Error('不允许此页面访问对话设置。');
 }
 
-ipcMain.handle('pet-save-coze-config', async (_event, payload) => {
-  const config = loadConfig();
-  const endpoint = String(payload?.endpoint || '').trim() || defaultConfig.coze.endpoint;
-  const token = String(payload?.token || '').trim();
-  const sessionId = String(payload?.sessionId || '').trim() || defaultConfig.coze.sessionId;
-  const projectIdNum = Number(payload?.projectId);
-  const projectId = Number.isFinite(projectIdNum) ? projectIdNum : defaultConfig.coze.projectId;
-
-  saveConfig({
-    ...config,
-    coze: {
-      endpoint,
-      token,
-      sessionId,
-      projectId
-    }
-  });
-
-  return { ok: true };
+ipcMain.handle('gateway-open', () => { getGateway().openWindow(); });
+ipcMain.handle('gateway-settings-get', event => { requireManagementSender(event); return getGateway().getSettings(); });
+ipcMain.handle('gateway-settings-save', (event, payload) => { requireManagementSender(event); return getGateway().saveSettings(payload); });
+ipcMain.handle('gateway-status', event => { requireManagementSender(event); return getGateway().request('/health'); });
+ipcMain.handle('gateway-manage', (event, { action, payload } = {}) => {
+  requireManagementSender(event);
+  const routes = { test: '/test' };
+  if (!routes[action]) throw new Error('不支持的管理操作。');
+  return getGateway().request(routes[action], payload || {});
 });
 
+// Cancel a generation only when requested by its originating pet renderer.
+ipcMain.on('pet-chat-cancel', event => {
+  if (activeDialogue?.sender === event.sender) activeDialogue.controller.abort();
+});
+
+// Keep request ownership in the main process and relay one normalized event stream.
 ipcMain.on('pet-chat-query-stream', async (event, payload) => {
-  const requestId = String(payload?.requestId || '');
-  const prompt = String(payload?.prompt || '').trim();
-
-  const send = (type, data = {}) => {
-    event.sender.send('pet-chat-stream', { requestId, type, ...data });
-  };
-
+  if (event.sender !== mainWindow?.webContents) return;
+  const requestId = String(payload?.requestId || '').slice(0, 100);
   if (!requestId) return;
-  if (!prompt) {
-    send('error', { error: 'empty_prompt' });
-    return;
-  }
-
-  const coze = getCozeConfig();
-  if (!coze.token) {
-    send('error', { error: 'missing_token' });
-    return;
-  }
-  if (!coze.userId || !coze.password) {
-    send('error', { error: 'missing_identity' });
-    return;
-  }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45000);
-
+  activeDialogue?.controller.abort();
+  const state = { sender: event.sender, controller: new AbortController() };
+  activeDialogue = state;
+  const send = data => {
+    if (activeDialogue === state && !event.sender.isDestroyed()) event.sender.send('pet-chat-stream', { requestId, ...data });
+  };
+  const disconnect = () => state.controller.abort();
+  event.sender.once('destroyed', disconnect);
   try {
-    const endpointUrl = new URL(coze.endpoint);
-    endpointUrl.searchParams.set('user_id', coze.userId);
-    endpointUrl.searchParams.set('password', coze.password);
-
-    const response = await fetch(endpointUrl.toString(), {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${coze.token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        content: {
-          query: {
-            prompt: [
-              {
-                type: 'text',
-                content: { text: prompt }
-              }
-            ]
-          }
-        },
-        type: 'query',
-        session_id: coze.sessionId,
-        project_id: coze.projectId,
-        time_zone: Number.isFinite(Number(coze.timeZone)) ? Number(coze.timeZone) : defaultConfig.coze.timeZone
-      }),
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      send('error', { error: `http_${response.status}` });
-      return;
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-      const raw = await response.text();
-      let parsed = null;
-      try {
-        parsed = JSON.parse(raw);
-      } catch (_) {
-        parsed = raw;
-      }
-      const text = parsed?.content?.answer || extractTextFromAny(parsed).trim();
-      send('chunk', { text: text || '（我暂时不知道怎么回答这句话）' });
-      send('done');
-      return;
-    }
-
-    const decoder = new TextDecoder('utf-8');
-    let buffer = '';
-    let fullText = '';
-    let ttsStarted = false;
-
-    const runTtsFlowList = (list, onDone) => {
-      if (!coze.aliyunApiKey) {
-        send('error', { error: 'missing_tts_credentials' });
-        return;
-      }
-
-      const payload = JSON.stringify(list || []);
-      const scriptCode = [
-        'import json, sys',
-        'from tts_flow import use',
-        'use(json.loads(sys.argv[1]))'
-      ].join('; ');
-
-      const url = coze.aliyunRegion === 'singapore'
-        ? 'wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime?model=qwen3-tts-flash-realtime'
-        : 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3-tts-flash-realtime';
-
-      const env = {
-        ...process.env,
-        DASHSCOPE_API_KEY: coze.aliyunApiKey,
-        TTS_REALTIME_URL: url,
-        PYTHONIOENCODING: 'utf-8',
-        PYTHONUTF8: '1'
-      };
-
-      const errLogPath = path.join(__dirname, 'tts_use_error.log');
-      const logPayload = () => {
-        try {
-          fs.writeFileSync(errLogPath, '', { flag: 'a', encoding: 'utf-8' });
-          fs.appendFileSync(errLogPath, `${new Date().toISOString()} spawn_python_stream payload_len=${payload.length}\n`, 'utf-8');
-        } catch (_) {
-          // ignore log errors
-        }
-      };
-
-      const spawnWith = (command) => {
-        logPayload();
-        const child = spawn(command, ['-c', scriptCode, payload], {
-          cwd: __dirname,
-          windowsHide: true,
-          env
-        });
-
-        child.on('close', () => {
-          if (typeof onDone === 'function') onDone();
-          send('tts_stream_done');
-        });
-
-        child.on('error', (err) => {
-          try {
-            fs.appendFileSync(errLogPath, `${new Date().toISOString()} spawn_error=${String(err?.message || err)}\n`, 'utf-8');
-          } catch (_) {
-            // ignore log errors
-          }
-          if (command === 'python') {
-            spawnWith('py');
-          }
-        });
-
-        child.stdout.on('data', (chunk) => {
-          const msg = String(chunk || '');
-          if (!msg) return;
-          if (msg.includes('AUDIO_START')) {
-            send('tts_audio_start');
-          }
-        });
-
-        child.stderr.on('data', (chunk) => {
-          const msg = String(chunk || '').trim();
-          if (!msg) return;
-          if (msg.includes('AUDIO_START')) {
-            send('tts_audio_start');
-          }
-          try {
-            fs.appendFileSync(errLogPath, `${new Date().toISOString()} ${msg}\n`, 'utf-8');
-          } catch (_) {
-            // ignore log errors
-          }
-          const lower = msg.toLowerCase();
-          if (lower.includes('error') || lower.includes('exception') || lower.includes('traceback')) {
-            send('error', { error: 'tts_stream_failed', detail: msg });
-          }
-        });
-      };
-
-      spawnWith('python');
-    };
-
-    const pushLine = (line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-
-      let payloadLine = trimmed;
-      if (payloadLine.startsWith('data:')) {
-        payloadLine = payloadLine.slice(5).trim();
-      }
-      if (!payloadLine || payloadLine === '[DONE]') return;
-
-      try {
-        const obj = JSON.parse(payloadLine);
-
-        // 按 Coze stream_run 实际格式，只消费 answer 分片
-        // 典型结构：{ type: 'answer', content: { answer: '...' } }
-        const answerPart = obj?.content?.answer;
-        if (obj?.type === 'answer' && typeof answerPart === 'string' && answerPart.length > 0) {
-          fullText += answerPart;
-          send('chunk', { text: answerPart });
-          return;
-        }
-
-        // 结束包：这里只标记结束，不在此处发送 done。
-        // 否则渲染层会提前 unsubscribe，收不到后续 tts_ready / tts_error。
-        if (obj?.type === 'message_end' || obj?.content?.message_end) {
-          return;
-        }
-      } catch (_) {
-        // 非 JSON 行忽略
-      }
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
-        pushLine(line);
-      }
-    }
-
-    if (buffer.trim()) {
-      pushLine(buffer);
-    }
-
-    const finalText = fullText.trim();
-    if (finalText) {
-      appendChatHistory(prompt, finalText);
-    }
-
-    const logPath = path.join(__dirname, 'tts_use_payload.log');
-    try {
-      fs.appendFileSync(logPath, `${new Date().toISOString()} stream_finalText_len=${finalText.length}\n`, 'utf-8');
-    } catch (_) {
-      // ignore log errors
-    }
-
-    if (finalText && coze.aliyunApiKey && !coze.ttsMuted) {
-      const sentences = finalText.split(/(?<=[。！？!?])/).map((s) => s.trim()).filter(Boolean);
-      const pairs = [];
-      for (let i = 0; i < sentences.length; i += 2) {
-        const pair = [sentences[i], sentences[i + 1]].filter(Boolean);
-        if (pair.length) pairs.push(pair);
-      }
-
-      try {
-        fs.appendFileSync(logPath, `${new Date().toISOString()} stream_pairs=${pairs.length}\n`, 'utf-8');
-      } catch (_) {
-        // ignore log errors
-      }
-
-      if (pairs.length) {
-        let index = 0;
-        const runNext = () => {
-          const current = pairs[index];
-          if (!current) return;
-          runTtsFlowList(current, () => {
-            index += 1;
-            runNext();
-          });
-        };
-        runNext();
-      } else {
-        try {
-          fs.appendFileSync(logPath, `${new Date().toISOString()} stream_no_sentences\n`, 'utf-8');
-        } catch (_) {
-          // ignore log errors
-        }
-      }
-    } else {
-      try {
-        fs.appendFileSync(logPath, `${new Date().toISOString()} stream_missing_key_or_text key=${coze.aliyunApiKey ? 'yes' : 'no'} text=${finalText ? 'yes' : 'no'} muted=${coze.ttsMuted ? 'yes' : 'no'}\n`, 'utf-8');
-      } catch (_) {
-        // ignore log errors
-      }
-    }
-
-    send('done');
+    await getGateway().chat(String(payload?.prompt || ''), send, state.controller.signal);
   } catch (error) {
-    const msg = String(error?.message || '');
-    if (error?.name === 'AbortError') {
-      send('error', { error: 'timeout', detail: msg });
-    } else if (msg.startsWith('aliyun_tts_http_')) {
-      send('error', { error: 'tts_create_failed', detail: msg });
-    } else if (msg.startsWith('aliyun_tts_python_failed_')) {
-      send('error', { error: 'tts_query_failed', detail: msg });
-    } else if (msg.startsWith('aliyun_tts_audio_url_missing')) {
-      send('error', { error: 'tts_query_failed', detail: msg });
-    } else {
-      send('error', { error: 'network_error', detail: msg });
-    }
+    send({ type: state.controller.signal.aborted ? 'cancelled' : 'error', error: error.message });
   } finally {
-    clearTimeout(timeout);
-  }
-});
-
-ipcMain.handle('pet-chat-query', async (_event, promptText) => {
-  const prompt = (promptText || '').trim();
-  if (!prompt) {
-    return { ok: false, error: 'empty_prompt' };
-  }
-
-  const coze = getCozeConfig();
-  if (!coze.token) {
-    return { ok: false, error: 'missing_token' };
-  }
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45000);
-
-  try {
-    const response = await fetch(coze.endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${coze.token}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        content: {
-          query: {
-            prompt: [
-              {
-                type: 'text',
-                content: { text: prompt }
-              }
-            ]
-          }
-        },
-        type: 'query',
-        session_id: coze.sessionId,
-        project_id: coze.projectId
-      }),
-      signal: controller.signal
-    });
-
-    if (!response.ok) {
-      const raw = await response.text();
-      return { ok: false, error: `http_${response.status}`, raw };
-    }
-
-    // 尝试流式解析（SSE/分块 JSON）
-    const reader = response.body?.getReader();
-    if (reader) {
-      const decoder = new TextDecoder('utf-8');
-      let buffer = '';
-      let fullText = '';
-
-      const pushLine = (line) => {
-        const trimmed = line.trim();
-        if (!trimmed) return;
-
-        let payload = trimmed;
-        if (payload.startsWith('data:')) {
-          payload = payload.slice(5).trim();
-        }
-        if (!payload || payload === '[DONE]') return;
-
-        try {
-          const obj = JSON.parse(payload);
-          const part = extractTextFromAny(obj).trim();
-          if (part) {
-            fullText += part;
-          }
-        } catch (_) {
-          // 非 JSON 分片，直接拼接文本
-          fullText += payload;
-        }
-      };
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split(/\r?\n/);
-        buffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          pushLine(line);
-        }
-      }
-
-      if (buffer.trim()) {
-        pushLine(buffer);
-      }
-
-      const finalText = fullText.trim() || '（我暂时不知道怎么回答这句话）';
-      const logPath = path.join(__dirname, 'tts_use_payload.log');
-      try {
-        fs.appendFileSync(logPath, `${new Date().toISOString()} finalText_len=${finalText.length}\n`, 'utf-8');
-      } catch (_) {
-        // ignore log errors
-      }
-
-      if (finalText && coze.aliyunApiKey) {
-        const sentences = finalText.split(/(?<=[。！？!?])/).map((s) => s.trim()).filter(Boolean);
-        const firstTwo = sentences.slice(0, 2);
-        if (firstTwo.length) {
-          runTtsFlowList(firstTwo, coze.aliyunApiKey, coze.aliyunRegion);
-        } else {
-          try {
-            fs.appendFileSync(logPath, `${new Date().toISOString()} no_sentences\n`, 'utf-8');
-          } catch (_) {
-            // ignore log errors
-          }
-        }
-      } else {
-        try {
-          fs.appendFileSync(logPath, `${new Date().toISOString()} missing_key_or_text key=${coze.aliyunApiKey ? 'yes' : 'no'}\n`, 'utf-8');
-        } catch (_) {
-          // ignore log errors
-        }
-      }
-
-      return {
-        ok: true,
-        text: finalText
-      };
-    }
-
-    // 回退：非流式
-    const raw = await response.text();
-    let parsed = null;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (_) {
-      parsed = raw;
-    }
-
-    const reply = extractTextFromAny(parsed).trim() || '（我暂时不知道怎么回答这句话）';
-    if (reply && coze.aliyunApiKey) {
-      const sentences = reply.split(/(?<=[。！？!?])/).map((s) => s.trim()).filter(Boolean);
-      const firstTwo = sentences.slice(0, 2);
-      if (firstTwo.length) {
-        runTtsFlowList(firstTwo, coze.aliyunApiKey, coze.aliyunRegion);
-      }
-    }
-
-    return {
-      ok: true,
-      text: reply,
-      raw: parsed
-    };
-  } catch (error) {
-    return { ok: false, error: error?.name === 'AbortError' ? 'timeout' : 'network_error' };
-  } finally {
-    clearTimeout(timeout);
+    event.sender.removeListener('destroyed', disconnect);
+    if (activeDialogue === state) activeDialogue = null;
   }
 });
 
@@ -1668,3 +917,6 @@ app.on('activate', () => {
     showPetWindow();
   }
 });
+
+// Abort background work and release the owned gateway when the app quits.
+app.on('before-quit', () => { activeDialogue?.controller.abort(); gatewayManager?.stop(); });

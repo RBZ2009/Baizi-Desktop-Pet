@@ -7,13 +7,15 @@
     "start": "electron .",
     "start:silent": "electron . --disable-logging",
     "pack:mac": "electron-builder --mac dir",
-    "dist:mac": "electron-builder --mac"
+    "dist:mac": "electron-builder --mac",
+    "test": "node --test tests/*.test.js"
   },
   "author": "",
   "license": "MIT",
   "dependencies": {
     "@pixiv/three-vrm": "^3.4.2",
     "@pixiv/three-vrm-animation": "^3.5.0",
+    "sql.js": "^1.14.2",
     "three": "^0.180.0"
   },
   "devDependencies": {

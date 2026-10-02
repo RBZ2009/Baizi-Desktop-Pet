@@ -1,6 +1,10 @@
+/**
+ * Responsibility: Bridge pet rendering to trusted Electron controls and dialogue events.
+ * Implementation: 1. Expose fixed IPC methods. 2. Return unsubscribe callbacks. 3. Keep Node and credentials private.
+ */
 const { contextBridge, ipcRenderer } = require('electron');
 
-// 目前只暴露一个占位 API，后续可扩展与主进程通信
+// Expose bounded desktop controls; provider credentials never cross this bridge.
 contextBridge.exposeInMainWorld('desktopPet', {
   getPosition: () => ipcRenderer.invoke('pet-get-position'),
   getCursorPoint: () => ipcRenderer.invoke('pet-get-cursor-point'),
@@ -32,7 +36,7 @@ contextBridge.exposeInMainWorld('desktopPet', {
     return () => ipcRenderer.removeListener('pet-breathing-mode-changed', handler);
   },
   getSizeScaleOverrides: () => ipcRenderer.invoke('pet-get-size-scale-overrides'),
-  chatQuery: (text) => ipcRenderer.invoke('pet-chat-query', text),
+  cancelChat: () => ipcRenderer.send('pet-chat-cancel'),
   chatQueryStream: (requestId, prompt) => ipcRenderer.send('pet-chat-query-stream', { requestId, prompt }),
   onChatStream: (callback) => {
     const handler = (_event, payload) => callback(payload);
@@ -47,7 +51,6 @@ contextBridge.exposeInMainWorld('desktopPet', {
     const handler = (_event, show) => callback(show);
     ipcRenderer.on('pet-show-pet-bounds-changed', handler);
     return () => ipcRenderer.removeListener('pet-show-pet-bounds-changed', handler);
-  },
-  synthesizeSpeech: (text) => ipcRenderer.invoke('pet-tts-synthesize', text)
+  }
 });
 

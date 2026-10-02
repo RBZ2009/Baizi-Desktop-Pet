@@ -1,3 +1,7 @@
+/**
+ * Responsibility: Render and animate the VRM pet and display gateway conversation events.
+ * Implementation: 1. Preserve model interaction. 2. Track one active reply. 3. Finalize text without waiting for speech.
+ */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import {
@@ -1292,138 +1296,36 @@ function renderStreamingSpeech(text) {
   }
 }
 
+let chatUnsubscribe = null;
+// Submit to the gateway, detach stale listeners and finalize text independently of speech.
 async function submitChatPrompt() {
-  if (!chatInputEl || !window.desktopPet?.chatQueryStream || !window.desktopPet?.onChatStream) return;
-
+  if (!chatInputEl || !window.desktopPet?.chatQueryStream) return;
   const text = chatInputEl.value.trim();
   if (!text) return;
-
+  chatUnsubscribe?.();
+  chatUnsubscribe = null;
+  window.desktopPet.cancelChat?.();
   chatInputEl.value = '';
   setChatPanelVisible(false);
-
-  if (speechHideTimer) {
-    clearTimeout(speechHideTimer);
-    speechHideTimer = null;
-  }
-
+  if (speechHideTimer) { clearTimeout(speechHideTimer); speechHideTimer = null; }
   const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   activeChatRequestId = requestId;
-
   let latestText = '';
-  let ttsReady = false;
-  let streamEnded = false;
-  let audioChunkCount = 0;
-  let receivedAnyStreamEvent = false;
-
-  renderStreamingSpeech('思考中...');
-
-  let pendingTextToShow = '';
-  let isWaitingForAudioStart = true;
-  let audioStartTimeout = window.setTimeout(() => {
-    if (isWaitingForAudioStart) {
-      isWaitingForAudioStart = false;
-      if (pendingTextToShow) {
-        renderStreamingSpeech(pendingTextToShow);
-        pendingTextToShow = '';
-      } else if (latestText) {
-        renderStreamingSpeech(latestText);
-      }
-    }
-  }, 3000);
-
-  const maybeFinalizeSpeech = () => {
-    if (!streamEnded) return;
-    showSpeech(latestText || '（没有收到可读回复）', 12000);
-  };
-
-  const unsubscribe = window.desktopPet.onChatStream((payload) => {
-    if (!payload || payload.requestId !== requestId) return;
-    receivedAnyStreamEvent = true;
-
+  renderStreamingSpeech('思考中…');
+  chatUnsubscribe = window.desktopPet.onChatStream(payload => {
+    if (!payload || payload.requestId !== activeChatRequestId) return;
     if (payload.type === 'chunk') {
       latestText += payload.text || '';
-      if (isWaitingForAudioStart) {
-        pendingTextToShow = latestText;
-      } else {
-        renderStreamingSpeech(latestText || '...');
-      }
-      return;
-    }
-
-    if (payload.type === 'tts_audio_start') {
-      isWaitingForAudioStart = false;
-      if (audioStartTimeout) {
-        window.clearTimeout(audioStartTimeout);
-        audioStartTimeout = null;
-      }
-      if (pendingTextToShow) {
-        renderStreamingSpeech(pendingTextToShow);
-        pendingTextToShow = '';
-      } else if (latestText) {
-        renderStreamingSpeech(latestText);
-      }
-      return;
-    }
-
-    if (payload.type === 'tts_audio_chunk') {
-      ttsReady = true;
-      audioChunkCount += 1;
-      return;
-    }
-
-    if (payload.type === 'tts_stream_done') {
-      streamEnded = true;
-      if (!audioChunkCount) {
-        showSpeech('语音流没有返回音频，请检查服务是否正常。', 6000);
-      }
-      if (audioStartTimeout) {
-        window.clearTimeout(audioStartTimeout);
-        audioStartTimeout = null;
-      }
-      if (isWaitingForAudioStart) {
-        isWaitingForAudioStart = false;
-        if (pendingTextToShow) {
-          renderStreamingSpeech(pendingTextToShow);
-          pendingTextToShow = '';
-        } else if (latestText) {
-          renderStreamingSpeech(latestText);
-        }
-      }
-      maybeFinalizeSpeech();
-      return;
-    }
-
-    if (payload.type === 'error') {
-      let errorText = '我刚刚走神了，再试一次吧。';
-      if (payload.error === 'missing_token') {
-        errorText = '未配置 Token，请先在对话设置中填写。';
-      } else if (payload.error === 'missing_identity') {
-        errorText = '未配置用户身份，请先在对话设置中填写 user_id 和 password。';
-      } else if (payload.error === 'missing_tts_credentials') {
-        errorText = '未配置阿里云语音 Key，请先在对话设置中填写阿里云 API Key。';
-      } else if (payload.error === 'tts_stream_failed') {
-        errorText = `流式语音失败：${payload.detail || 'unknown'}。`;
-      } else if (payload.error === 'tts_create_failed') {
-        errorText = '语音任务创建失败，请稍后重试。';
-      } else if (payload.error === 'tts_query_failed') {
-        errorText = `语音任务查询失败：${payload.detail || 'unknown'}，已回退文字显示。`;
-      }
-      if (latestText) {
-        showSpeech(`${errorText}\n\n${latestText}`, 12000);
-      } else {
-        showSpeech(errorText, 7000);
-      }
+      renderStreamingSpeech(latestText);
+    } else if (['done', 'error', 'cancelled'].includes(payload.type)) {
+      const text = payload.type === 'done' ? (payload.text || latestText) :
+        (payload.type === 'cancelled' ? (latestText || '已停止回复。') : `${payload.error || '对话失败。'}${latestText ? '\n\n' + latestText : ''}`);
+      showSpeech(text || '没有收到可读回复。', 12000);
       activeChatRequestId = null;
-      unsubscribe?.();
-      return;
-    }
-
-    if (payload.type === 'done') {
-      activeChatRequestId = null;
-      unsubscribe?.();
+      chatUnsubscribe?.();
+      chatUnsubscribe = null;
     }
   });
-
   window.desktopPet.chatQueryStream(requestId, text);
 }
 
