@@ -7,7 +7,7 @@ const defaults = {
   model: 'qwen-plus', apiKey: '', temperature: 0.8,
   contextWindow: 32768, maxOutputTokens: 2048, requestTimeoutMs: 90000,
   autoMemory: true, memoryModel: '', ttsEnabled: false,
-  ttsVoice: 'Tingting', ttsRate: 180
+  ttsVoice: 'Tingting', ttsRate: 180, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
 };
 
 // Accept HTTPS providers and explicit loopback HTTP providers for local development.
@@ -29,6 +29,9 @@ function normalizeSettings(input = {}) {
   if (result.maxOutputTokens + 1024 >= result.contextWindow) throw new Error('上下文窗口必须大于输出预算加 1024。');
   result.autoMemory = !!result.autoMemory;
   result.ttsEnabled = !!result.ttsEnabled;
+  result.timeZone = String(result.timeZone || defaults.timeZone);
+  try { new Intl.DateTimeFormat('zh-CN', { timeZone: result.timeZone }).format(); }
+  catch { throw new Error('时区无效，请填写 Asia/Shanghai 等 IANA 时区。'); }
   return result;
 }
 

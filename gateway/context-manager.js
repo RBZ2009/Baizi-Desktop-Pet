@@ -41,7 +41,7 @@ class ContextManager {
   // Assemble context under the configured input budget, using summaries only for completed turns.
   async build(sessionId, prompt, settings, signal) {
     const budget = settings.contextWindow - settings.maxOutputTokens - 1024;
-    const fixed = [{ role: 'system', content: this.persona + '\n当前本机时间：' + new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) + '（Asia/Shanghai）' }];
+    const fixed = [{ role: 'system', content: this.persona + '\n当前时间：' + new Date().toLocaleString('zh-CN', { timeZone: settings.timeZone }) + `（${settings.timeZone}）` }];
     const current = { role: 'user', content: prompt };
     if (tokenBound([...fixed, current]) > budget) throw new Error('这条消息超过模型上下文预算，请缩短消息或调整上下文窗口。');
     let session = this.storage.all('SELECT * FROM sessions WHERE id=?', [sessionId])[0];

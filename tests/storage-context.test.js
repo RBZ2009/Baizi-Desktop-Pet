@@ -139,3 +139,20 @@ test('retrieval prioritizes relevant Chinese facts rather than injecting the ent
   assert.equal(result.length, 1);
   assert.equal(result[0].value, '不喜欢甜食');
 });
+
+test('malformed extraction is recorded as a retryable failure without saving invented memories', async () => {
+  const f = await fixture();
+  const server = http.createServer((_req, res) => res.end(JSON.stringify({ choices: [{ message: { content: '格式损坏' } }] })));
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const service = new MemoryService(f.storage, () => normalizeSettings({ baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'mock' }));
+  try {
+    const turn = f.storage.beginTurn(f.storage.currentSession().id, '我叫小明');
+    f.storage.finishTurn(turn, '你好', 'complete'); f.storage.enqueueMemory(turn.userId);
+    service.kick();
+    const deadline = Date.now() + 3000;
+    while (service.running && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(f.storage.memories().length, 0);
+    assert.equal(f.storage.pendingJob().attempts, 1);
+    assert.ok(f.storage.meta('last_memory_error'));
+  } finally { service.stop(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.close(); }
+});

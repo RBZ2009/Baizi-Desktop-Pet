@@ -15,12 +15,22 @@
 <div class="grid"><label>上下文窗口（tokens）<input id="contextWindow" type="number" min="4096" max="1000000" required></label><label>回复上限（tokens）<input id="maxOutputTokens" type="number" min="128" max="32768" required></label></div>
 <div class="grid"><label>温度<input id="temperature" type="number" min="0" max="2" step="0.1" required></label><label>超时（秒）<input id="timeoutSeconds" type="number" min="1" max="300" required></label></div>
 <label>记忆提取模型<input id="memoryModel" placeholder="留空使用对话模型"></label>
+<label>时区<input id="timeZone" placeholder="Asia/Shanghai"></label>
 <label class="check"><input id="autoMemory" type="checkbox">自动提取值得长期记住的信息</label>
 <label class="check"><input id="ttsEnabled" type="checkbox">使用 macOS 系统语音播报回复</label>
 <div class="grid"><label>系统声音<input id="ttsVoice" placeholder="Tingting"></label><label>语速（每分钟字数）<input id="ttsRate" type="number" min="80" max="400" required></label></div>
 <p class="hint">API Key 使用系统安全存储加密。选入上下文的对话和记忆会发送给模型供应商。</p>
 <div class="actions"><button type="submit">保存设置</button><button id="test-model" type="button">测试模型连接</button></div>
 </form></section>
-<section id="memories" hidden><p>长期记忆将在下一开发步骤接入。</p></section>
-<section id="history" hidden><p>会话管理将在下一开发步骤接入。</p></section>
+<section id="memories" hidden>
+<p class="hint">重要事实会在回复后自动提取。这里可以直接添加、纠正或删除；删除会阻止旧记录重新写入同一记忆。删除记忆不会删除聊天原文，旧会话仍可能提及；开启新会话后只会召回未删除的记忆。</p>
+<form id="memory-form"><input id="memoryId" type="hidden"><label>记忆主题<input id="memoryKey" maxlength="160" required placeholder="例如：称呼、饮食偏好、当前目标"></label><label>记忆内容<textarea id="memoryValue" maxlength="1000" required></textarea></label>
+<div class="actions"><button type="submit">保存记忆</button><button type="button" id="reset-memory">取消编辑</button><button type="button" id="retry-memory">重试失败提取</button></div></form>
+<div class="actions"><button id="refresh-memories">刷新记忆</button><button id="export-data">导出聊天与记忆</button></div>
+<p id="memory-status" class="muted"></p><div id="memory-list"></div></section>
+<section id="history" hidden>
+<div class="actions"><button id="new-session">开启新会话</button><button id="refresh-history">刷新历史</button></div>
+<p class="hint">新会话清空短期上下文，长期记忆仍保留。切换会话会停止当前回复和播报。</p>
+<label>查看会话<select id="session-select"></select></label><button id="select-session">继续选中的会话</button>
+<p id="session-status" class="muted"></p><div id="history-list"></div></section>
 <script src="dialogue.js"></script></body></html>

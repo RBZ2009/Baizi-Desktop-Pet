@@ -6,6 +6,8 @@ const { app, BrowserWindow, ipcMain, Menu, Tray, screen, nativeImage, dialog } =
 const fs = require('fs');
 const path = require('path');
 const { GatewayManager } = require('./gateway-manager');
+const { SpeechService } = require('./speech-service');
+const speechService = new SpeechService();
 
 let mainWindow;
 let speechWindow = null;
@@ -37,28 +39,9 @@ const defaultConfig = {
     medium: 1,
     large: 1
   },
-  chatHistory: [],
-  coze: {
-    endpoint: 'https://c8g6hqj92v.coze.site/stream_run',
-    token: '',
-    userId: '',
-    password: '',
-    sessionId: 'NTOkPVCF4uso9sYdEtzo6',
-    projectId: 7614676808751104006,
-    bubbleAnchorX: 0.56,
-    bubbleAnchorY: 0.34,
-    bubbleAutoClose: true,
-    bubblePerCharMs: 180,
-    charsPerLine: 15,
-    timeZone: 8,
-    aliyunApiKey: '',
-    aliyunBaseUrl: 'https://dashscope.aliyuncs.com/api/v1',
-    aliyunRegion: 'beijing',
-    aliyunTtsModel: 'qwen3-tts-flash',
-    aliyunTtsVoice: 'Bella',
-    aliyunTtsInstructions: '',
-    aliyunOptimizeInstructions: true,
-    ttsMuted: false
+  dialogue: {
+    bubbleAnchorX: 0.56, bubbleAnchorY: 0.34,
+    bubbleAutoClose: true, bubblePerCharMs: 180, charsPerLine: 15
   }
 };
 
@@ -66,7 +49,12 @@ const defaultConfig = {
 function loadConfig() {
   try {
     if (!fs.existsSync(configPath)) return structuredClone(defaultConfig);
-    return { ...structuredClone(defaultConfig), ...JSON.parse(fs.readFileSync(configPath, 'utf8')) };
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    if (parsed.coze && !parsed.dialogue) {
+      parsed.dialogue = Object.fromEntries(Object.keys(defaultConfig.dialogue).map(key => [key, parsed.coze[key] ?? defaultConfig.dialogue[key]]));
+    }
+    delete parsed.coze;
+    return { ...structuredClone(defaultConfig), ...parsed };
   } catch { return structuredClone(defaultConfig); }
 }
 
@@ -118,10 +106,10 @@ function syncSpeechWindowPosition() {
   const [, sh] = speechWindow.getContentSize();
 
   const cfg = loadConfig();
-  const anchorX = Number(cfg?.coze?.bubbleAnchorX);
-  const anchorY = Number(cfg?.coze?.bubbleAnchorY);
-  const ax = Number.isFinite(anchorX) ? anchorX : defaultConfig.coze.bubbleAnchorX;
-  const ay = Number.isFinite(anchorY) ? anchorY : defaultConfig.coze.bubbleAnchorY;
+  const anchorX = Number(cfg?.dialogue?.bubbleAnchorX);
+  const anchorY = Number(cfg?.dialogue?.bubbleAnchorY);
+  const ax = Number.isFinite(anchorX) ? anchorX : defaultConfig.dialogue.bubbleAnchorX;
+  const ay = Number.isFinite(anchorY) ? anchorY : defaultConfig.dialogue.bubbleAnchorY;
 
   const nx = x + Math.round(w * ax);
   const ny = y + Math.round(h * ay) - sh;
@@ -536,18 +524,18 @@ function openPreferencesWindow() {
     <label>呼吸效果</label>
     <select id="breathingMode"><option value="off">关闭</option><option value="subtle">轻微</option><option value="normal">标准</option></select>
   </div>
-  <div id="ai" class="panel"><button id="openDialogue">打开对话与记忆设置</button><div class="hint">配置模型 API、自动记忆和系统语音。</div><div class="row"><div><label>气泡锚点 X</label><input id="bubbleAnchorX" type="number" step="0.01" value="${safe(config?.coze?.bubbleAnchorX ?? 0.56)}"></div><div><label>气泡锚点 Y</label><input id="bubbleAnchorY" type="number" step="0.01" value="${safe(config?.coze?.bubbleAnchorY ?? 0.34)}"></div></div><label><input id="bubbleAutoClose" type="checkbox">气泡自动关闭</label><label>每字符停留时间（毫秒）<input id="bubblePerCharMs" type="number" min="10" value="${safe(config?.coze?.bubblePerCharMs ?? 180)}"></label><label>每行字符数<input id="charsPerLine" type="number" min="5" value="${safe(config?.coze?.charsPerLine ?? 15)}"></label></div>
-  <div id="general" class="panel"><label><input id="autoLaunch" type="checkbox"> 开机自启动</label><label><input id="showPetBounds" type="checkbox"> 显示角色容器边界（调试）</label><div class="row"><div><label>时区（UTC+）</label><input id="timeZone" type="number" step="1" value="${safe(config?.coze?.timeZone ?? defaultConfig.coze.timeZone)}"></div></div><div class="hint">例如 8 表示 UTC+8。</div></div>
+  <div id="ai" class="panel"><button id="openDialogue">打开对话与记忆设置</button><div class="hint">配置模型 API、自动记忆和系统语音。</div><div class="row"><div><label>气泡锚点 X</label><input id="bubbleAnchorX" type="number" step="0.01" value="${safe(config?.dialogue?.bubbleAnchorX ?? 0.56)}"></div><div><label>气泡锚点 Y</label><input id="bubbleAnchorY" type="number" step="0.01" value="${safe(config?.dialogue?.bubbleAnchorY ?? 0.34)}"></div></div><label><input id="bubbleAutoClose" type="checkbox">气泡自动关闭</label><label>每字符停留时间（毫秒）<input id="bubblePerCharMs" type="number" min="10" value="${safe(config?.dialogue?.bubblePerCharMs ?? 180)}"></label><label>每行字符数<input id="charsPerLine" type="number" min="5" value="${safe(config?.dialogue?.charsPerLine ?? 15)}"></label></div>
+  <div id="general" class="panel"><label><input id="autoLaunch" type="checkbox"> 开机自启动</label><label><input id="showPetBounds" type="checkbox"> 显示角色容器边界（调试）</label></div>
   <div class="btns"><button class="cancel" id="cancelBtn">取消</button><button class="save" id="saveBtn">保存</button></div>
   <script>
     const { ipcRenderer } = require('electron');
-    const cfg = ${JSON.stringify(config)};
+    const cfg = ${JSON.stringify(config).replaceAll('<', '\\u003c')};
     document.getElementById('sizeMode').value = cfg.sizeMode || 'medium';
     document.getElementById('behaviorStyle').value = cfg.behaviorStyle || 'balanced';
     document.getElementById('breathingMode').value = cfg.breathingMode || 'subtle';
     document.getElementById('autoLaunch').checked = !!cfg.autoLaunch;
     document.getElementById('showPetBounds').checked = !!cfg.showPetBounds;
-    document.getElementById('bubbleAutoClose').checked = (cfg?.coze?.bubbleAutoClose ?? true) !== false;
+    document.getElementById('bubbleAutoClose').checked = (cfg?.dialogue?.bubbleAutoClose ?? true) !== false;
     document.querySelectorAll('.tab').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.getElementById(btn.dataset.panel).classList.add('active');}));
     document.getElementById('openDialogue').addEventListener('click',()=>ipcRenderer.invoke('gateway-open'));
     document.getElementById('cancelBtn').addEventListener('click',()=>window.close());
@@ -568,13 +556,12 @@ function openPreferencesWindow() {
           medium: Number(document.getElementById('scMedium').value) || 1,
           large: Number(document.getElementById('scLarge').value) || 1
         },
-        coze: {
+        dialogue: {
           bubbleAnchorX: Number(document.getElementById('bubbleAnchorX').value),
           bubbleAnchorY: Number(document.getElementById('bubbleAnchorY').value),
           bubbleAutoClose: document.getElementById('bubbleAutoClose').checked,
           bubblePerCharMs: Number(document.getElementById('bubblePerCharMs').value),
-          charsPerLine: Number(document.getElementById('charsPerLine').value),
-          timeZone: Number(document.getElementById('timeZone').value)
+          charsPerLine: Number(document.getElementById('charsPerLine').value)
         }
       };
       const res = await ipcRenderer.invoke('pet-save-preferences', payload);
@@ -588,38 +575,6 @@ function openPreferencesWindow() {
       window.close();
     });
   </script></body></html>`;
-
-  win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-}
-
-function openChatHistoryWindow() {
-  const cfg = loadConfig();
-  const history = (Array.isArray(cfg.chatHistory) ? cfg.chatHistory : []).slice().reverse();
-
-  const win = new BrowserWindow({
-    width: 620,
-    height: 560,
-    title: '对话历史',
-    resizable: true,
-    autoHideMenuBar: true,
-    alwaysOnTop: true,
-    webPreferences: { nodeIntegration: true, contextIsolation: false }
-  });
-
-  const safe = (v) => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
-  const items = history.length
-    ? history.map((item, idx) => `<div class="card"><div class="idx">#${history.length - idx}</div><div class="row"><b>你：</b>${safe(item.user || '—')}</div><div class="row"><b>桌宠：</b>${safe(item.assistant || '—')}</div></div>`).join('')
-    : '<div class="empty">暂无对话历史</div>';
-
-  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><title>对话历史</title><style>
-    body{margin:0;font-family:ui-sans-serif,system-ui;background:#0f172a;color:#e2e8f0}
-    .wrap{padding:12px;display:flex;flex-direction:column;gap:10px;height:100vh;box-sizing:border-box}
-    .list{overflow:auto;display:flex;flex-direction:column;gap:10px;padding-right:4px}
-    .card{background:#111827;border:1px solid #334155;border-radius:10px;padding:10px}
-    .idx{font-size:12px;color:#94a3b8;margin-bottom:6px}
-    .row{line-height:1.5;word-break:break-word}
-    .empty{color:#94a3b8;padding:20px;text-align:center}
-  </style></head><body><div class="wrap"><div class="list">${items}</div></div></body></html>`;
 
   win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 }
@@ -706,9 +661,9 @@ ipcMain.handle('pet-get-show-pet-bounds', () => !!loadConfig().showPetBounds);
 ipcMain.handle('pet-get-dialogue-settings', () => {
   const cfg = loadConfig();
   return {
-    bubbleAutoClose: (cfg?.coze?.bubbleAutoClose ?? defaultConfig.coze.bubbleAutoClose) !== false,
-    bubblePerCharMs: Number(cfg?.coze?.bubblePerCharMs ?? defaultConfig.coze.bubblePerCharMs),
-    charsPerLine: Number(cfg?.coze?.charsPerLine ?? defaultConfig.coze.charsPerLine)
+    bubbleAutoClose: (cfg?.dialogue?.bubbleAutoClose ?? defaultConfig.dialogue.bubbleAutoClose) !== false,
+    bubblePerCharMs: Number(cfg?.dialogue?.bubblePerCharMs ?? defaultConfig.dialogue.bubblePerCharMs),
+    charsPerLine: Number(cfg?.dialogue?.charsPerLine ?? defaultConfig.dialogue.charsPerLine)
   };
 });
 ipcMain.handle('pet-get-size-scale-overrides', () => {
@@ -778,13 +733,12 @@ ipcMain.handle('pet-save-preferences', async (_event, payload) => {
       medium: sanitize(payload?.sizeScaleOverrides?.medium),
       large: sanitize(payload?.sizeScaleOverrides?.large)
     },
-    coze: {
-      bubbleAnchorX: Number.isFinite(Number(payload?.coze?.bubbleAnchorX)) ? Number(payload.coze.bubbleAnchorX) : (current?.coze?.bubbleAnchorX ?? defaultConfig.coze.bubbleAnchorX),
-      bubbleAnchorY: Number.isFinite(Number(payload?.coze?.bubbleAnchorY)) ? Number(payload.coze.bubbleAnchorY) : (current?.coze?.bubbleAnchorY ?? defaultConfig.coze.bubbleAnchorY),
-      bubbleAutoClose: typeof payload?.coze?.bubbleAutoClose === 'boolean' ? payload.coze.bubbleAutoClose : (current?.coze?.bubbleAutoClose ?? true),
-      bubblePerCharMs: Number.isFinite(Number(payload?.coze?.bubblePerCharMs)) ? Math.max(10, Number(payload.coze.bubblePerCharMs)) : (current?.coze?.bubblePerCharMs ?? defaultConfig.coze.bubblePerCharMs),
-      charsPerLine: Number.isFinite(Number(payload?.coze?.charsPerLine)) ? Math.max(5, Number(payload.coze.charsPerLine)) : (current?.coze?.charsPerLine ?? defaultConfig.coze.charsPerLine),
-      timeZone: Number.isFinite(Number(payload?.coze?.timeZone)) ? Math.max(-12, Math.min(14, Math.round(Number(payload.coze.timeZone)))) : (current?.coze?.timeZone ?? defaultConfig.coze.timeZone)
+    dialogue: {
+      bubbleAnchorX: Number.isFinite(Number(payload?.dialogue?.bubbleAnchorX)) ? Number(payload.dialogue.bubbleAnchorX) : (current?.dialogue?.bubbleAnchorX ?? defaultConfig.dialogue.bubbleAnchorX),
+      bubbleAnchorY: Number.isFinite(Number(payload?.dialogue?.bubbleAnchorY)) ? Number(payload.dialogue.bubbleAnchorY) : (current?.dialogue?.bubbleAnchorY ?? defaultConfig.dialogue.bubbleAnchorY),
+      bubbleAutoClose: typeof payload?.dialogue?.bubbleAutoClose === 'boolean' ? payload.dialogue.bubbleAutoClose : (current?.dialogue?.bubbleAutoClose ?? true),
+      bubblePerCharMs: Number.isFinite(Number(payload?.dialogue?.bubblePerCharMs)) ? Math.max(10, Number(payload.dialogue.bubblePerCharMs)) : (current?.dialogue?.bubblePerCharMs ?? defaultConfig.dialogue.bubblePerCharMs),
+      charsPerLine: Number.isFinite(Number(payload?.dialogue?.charsPerLine)) ? Math.max(5, Number(payload.dialogue.charsPerLine)) : (current?.dialogue?.charsPerLine ?? defaultConfig.dialogue.charsPerLine),
     }
   };
 
@@ -823,17 +777,29 @@ ipcMain.handle('gateway-open', () => { getGateway().openWindow(); });
 ipcMain.handle('gateway-settings-get', event => { requireManagementSender(event); return getGateway().getSettings(); });
 ipcMain.handle('gateway-settings-save', (event, payload) => { requireManagementSender(event); return getGateway().saveSettings(payload); });
 ipcMain.handle('gateway-status', event => { requireManagementSender(event); return getGateway().request('/health'); });
-ipcMain.handle('gateway-manage', (event, { action, payload } = {}) => {
+ipcMain.handle('gateway-manage', async (event, { action, payload } = {}) => {
   requireManagementSender(event);
   const routes = { test: '/test', sessions: '/sessions', history: '/history', newSession: '/session/new', selectSession: '/session/select',
     memories: '/memories', saveMemory: '/memory/save', deleteMemory: '/memory/delete', memorySource: '/memory/source', retryMemory: '/memory/retry', export: '/export' };
   if (!routes[action]) throw new Error('不支持的管理操作。');
-  return getGateway().request(routes[action], payload || {});
+  if (['newSession', 'selectSession'].includes(action)) { activeDialogue?.controller.abort(); speechService.stop(); }
+  const result = await getGateway().request(routes[action], payload || {});
+  if (action === 'export') {
+    const choice = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), {
+      title: '导出聊天与记忆', defaultPath: '白子聊天与记忆.json', filters: [{ name: 'JSON', extensions: ['json'] }]
+    });
+    if (choice.canceled) return { cancelled: true };
+    fs.writeFileSync(choice.filePath, JSON.stringify(result, null, 2), { mode: 0o600 });
+    return { ok: true };
+  }
+  return result;
 });
 
 // Cancel a generation only when requested by its originating pet renderer.
 ipcMain.on('pet-chat-cancel', event => {
-  if (activeDialogue?.sender === event.sender) activeDialogue.controller.abort();
+  if (event.sender !== mainWindow?.webContents) return;
+  activeDialogue?.controller.abort();
+  speechService.stop();
 });
 
 // Keep request ownership in the main process and relay one normalized event stream.
@@ -844,7 +810,14 @@ ipcMain.on('pet-chat-query-stream', async (event, payload) => {
   activeDialogue?.controller.abort();
   const state = { sender: event.sender, controller: new AbortController() };
   activeDialogue = state;
+  speechService.begin(getGateway().getSettings(), status => {
+    if (!event.sender.isDestroyed()) event.sender.send('pet-speech-status', { requestId, ...status });
+  });
   const send = data => {
+    if (activeDialogue !== state) return;
+    if (data.type === 'chunk') speechService.append(data.text);
+    if (data.type === 'done') speechService.finish();
+    if (data.type === 'error' || data.type === 'cancelled') speechService.stop();
     if (activeDialogue === state && !event.sender.isDestroyed()) event.sender.send('pet-chat-stream', { requestId, ...data });
   };
   const disconnect = () => state.controller.abort();
@@ -897,11 +870,20 @@ ipcMain.on('pet-close', () => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
 });
 
+// A single owner prevents simultaneous utility processes from writing the same SQLite file.
+if (!app.requestSingleInstanceLock()) app.exit(0);
+app.on('second-instance', () => showPetWindow());
+
 app.whenReady().then(() => {
   const config = loadConfig();
   applyAutoLaunch(config.autoLaunch);
   createWindow();
   createTray();
+  getGateway().ensureStarted().then(() => {
+    const clean = loadConfig();
+    delete clean.chatHistory;
+    saveConfig(clean);
+  }).catch(error => dialog.showMessageBox({ type: 'error', title: '本地对话服务无法启动', message: error.message }));
 });
 
 app.on('window-all-closed', () => {
@@ -920,4 +902,4 @@ app.on('activate', () => {
 });
 
 // Abort background work and release the owned gateway when the app quits.
-app.on('before-quit', () => { activeDialogue?.controller.abort(); gatewayManager?.stop(); });
+app.on('before-quit', () => { activeDialogue?.controller.abort(); speechService.stop(); gatewayManager?.stop(); });

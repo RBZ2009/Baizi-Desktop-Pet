@@ -13,6 +13,7 @@ async function* readSse(body) {
     while (true) {
       const { value, done } = await reader.read();
       buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      if (buffer.length > 1024 * 1024) throw new Error('响应分片超过长度限制。');
       let index;
       while ((index = buffer.indexOf('\n')) !== -1) {
         const line = buffer.slice(0, index).replace(/\r$/, '');
@@ -62,20 +63,23 @@ async function chatCompletion(settings, messages, { signal, onDelta, model, json
     let text = '';
     let usage = null;
     let finishReason = null;
+    let streamCompleted = false;
     if ((response.headers.get('content-type') || '').includes('text/event-stream')) {
       if (!response.body) throw new Error('模型没有返回响应流。');
       for await (const data of readSse(response.body)) {
-        if (data.trim() === '[DONE]') break;
+        if (data.trim() === '[DONE]') { streamCompleted = true; break; }
         let event;
         try { event = JSON.parse(data); } catch { throw new Error('模型返回了无法解析的流式数据。'); }
         if (event.error) throw new Error('模型返回了错误事件。');
         usage = event.usage || usage;
         finishReason = event.choices?.[0]?.finish_reason || finishReason;
+        if (finishReason) streamCompleted = true;
         const delta = textContent(event.choices?.[0]?.delta?.content);
         text += delta;
         if (text.length > 200000) throw new Error('模型回复超过长度限制。');
         if (delta) onDelta?.(delta);
       }
+      if (!streamCompleted) throw new Error('模型响应流意外结束，未保存为完整回复。');
     } else {
       const event = await response.json();
       if (event.error) throw new Error('模型返回了错误事件。');
@@ -84,6 +88,7 @@ async function chatCompletion(settings, messages, { signal, onDelta, model, json
       usage = event.usage;
       if (text) onDelta?.(text);
     }
+    if (text.length > 200000) throw new Error('模型回复超过长度限制。');
     if (!text.trim()) throw new Error('模型未返回可读回复。');
     return { text, usage, finishReason };
   } catch (error) {

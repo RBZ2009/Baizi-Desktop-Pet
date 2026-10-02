@@ -37,6 +37,12 @@ contextBridge.exposeInMainWorld('desktopPet', {
   },
   getSizeScaleOverrides: () => ipcRenderer.invoke('pet-get-size-scale-overrides'),
   cancelChat: () => ipcRenderer.send('pet-chat-cancel'),
+  openDialogueSettings: () => ipcRenderer.invoke('gateway-open'),
+  onSpeechStatus: callback => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('pet-speech-status', handler);
+    return () => ipcRenderer.removeListener('pet-speech-status', handler);
+  },
   chatQueryStream: (requestId, prompt) => ipcRenderer.send('pet-chat-query-stream', { requestId, prompt }),
   onChatStream: (callback) => {
     const handler = (_event, payload) => callback(payload);
@@ -53,4 +59,3 @@ contextBridge.exposeInMainWorld('desktopPet', {
     return () => ipcRenderer.removeListener('pet-show-pet-bounds-changed', handler);
   }
 });
-

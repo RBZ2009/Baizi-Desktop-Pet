@@ -15,12 +15,14 @@ const persona = fs.readFileSync(path.join(__dirname, 'prompts/baizi.md'), 'utf8'
 
 // Limit request size before parsing client data.
 async function readJson(req) {
-  let body = '';
+  const chunks = [];
+  let bytes = 0;
   for await (const chunk of req) {
-    body += chunk;
-    if (Buffer.byteLength(body) > 1024 * 1024) throw new Error('请求过大。');
+    bytes += chunk.length;
+    if (bytes > 1024 * 1024) throw new Error('请求过大。');
+    chunks.push(chunk);
   }
-  return JSON.parse(body || '{}');
+  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
 }
 
 // Start the service on a kernel-selected loopback port; the bearer token stays in the main process.
@@ -42,7 +44,7 @@ async function createGateway({ token, settings, dataDir, legacyHistory = [] }) {
       if (req.url === '/health' && req.method === 'GET') return respond({ ok: true, session: storage.currentSession(),
         memories: storage.memories().length, pendingJobs: storage.all("SELECT COUNT(*) AS count FROM jobs WHERE status IN ('pending','running')")[0].count,
         failedJobs: storage.all("SELECT COUNT(*) AS count FROM jobs WHERE status='failed'")[0].count,
-        memoryError: storage.meta('last_memory_error') || '', summaryError: storage.meta('last_summary_error') || '',
+        memoryError: memory.lastError || storage.meta('last_memory_error') || '', summaryError: storage.meta('last_summary_error') || '',
         memoryResult: storage.meta('last_memory_result') || '' });
       const body = req.method === 'POST' ? await readJson(req) : {};
       if (req.url === '/configure' && req.method === 'POST') {

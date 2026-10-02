@@ -1297,6 +1297,14 @@ function renderStreamingSpeech(text) {
 }
 
 let chatUnsubscribe = null;
+let lastChatRequestId = null;
+let lastChatText = '';
+// Surface playback errors only for the current reply, without discarding its text.
+window.desktopPet?.onSpeechStatus?.(status => {
+  if (status.requestId === lastChatRequestId && status.type === 'error') {
+    showSpeech(`${lastChatText || '语音提示'}\n\n${status.error}`, 12000);
+  }
+});
 // Submit to the gateway, detach stale listeners and finalize text independently of speech.
 async function submitChatPrompt() {
   if (!chatInputEl || !window.desktopPet?.chatQueryStream) return;
@@ -1310,17 +1318,22 @@ async function submitChatPrompt() {
   if (speechHideTimer) { clearTimeout(speechHideTimer); speechHideTimer = null; }
   const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   activeChatRequestId = requestId;
+  lastChatRequestId = requestId;
+  lastChatText = '';
   let latestText = '';
   renderStreamingSpeech('思考中…');
   chatUnsubscribe = window.desktopPet.onChatStream(payload => {
     if (!payload || payload.requestId !== activeChatRequestId) return;
     if (payload.type === 'chunk') {
       latestText += payload.text || '';
+      lastChatText = latestText;
       renderStreamingSpeech(latestText);
     } else if (['done', 'error', 'cancelled'].includes(payload.type)) {
       const text = payload.type === 'done' ? (payload.text || latestText) :
         (payload.type === 'cancelled' ? (latestText || '已停止回复。') : `${payload.error || '对话失败。'}${latestText ? '\n\n' + latestText : ''}`);
-      showSpeech(text || '没有收到可读回复。', 12000);
+      lastChatText = text;
+      const note = payload.truncated ? '\n\n（回复达到输出上限，可让白子继续。）' : '';
+      showSpeech((text || '没有收到可读回复。') + note, 12000);
       activeChatRequestId = null;
       chatUnsubscribe?.();
       chatUnsubscribe = null;
@@ -1713,6 +1726,9 @@ window.addEventListener('keydown', (e) => {
     setChatPanelVisible(false);
   }
 });
+
+// Let the user stop generation and speech without submitting another message.
+document.getElementById('chat-stop')?.addEventListener('click', () => window.desktopPet?.cancelChat?.());
 
 if (chatSendEl) {
   chatSendEl.addEventListener('click', () => {

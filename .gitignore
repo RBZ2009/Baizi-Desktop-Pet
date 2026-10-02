@@ -33,3 +33,10 @@ pet-config.json
 
 # Machine-specific Windows shortcuts
 *.lnk
+
+# Local dialogue storage and generated speech
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+outputs/

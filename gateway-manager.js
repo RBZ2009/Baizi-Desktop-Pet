@@ -49,7 +49,7 @@ class GatewayManager {
     fs.renameSync(temporary, this.settingsPath);
     this.settings = next;
     this.settingsError = '';
-    if (this.port) await this.request('/configure', next);
+    if (this.port || this.starting) await this.request('/configure', next);
     return this.getSettings();
   }
 

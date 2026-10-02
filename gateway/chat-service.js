@@ -24,7 +24,7 @@ class ChatService {
           signal, onDelta: delta => { text += delta; send({ type: 'chunk', text: delta }); }
         });
         if (signal.aborted) throw Object.assign(new Error('请求已取消。'), { name: 'AbortError' });
-        this.storage.finishTurn(turn, result.text, 'complete');
+        this.storage.finishTurn(turn, result.text, result.finishReason === 'length' ? 'truncated' : 'complete');
         let memoryError = '';
         if (settings.autoMemory && result.finishReason !== 'length') {
           try { this.storage.enqueueMemory(turn.userId); this.memory.kick(); }

@@ -82,3 +82,12 @@ test('provider settings reject credential-bearing URLs and inconsistent budgets'
   assert.throws(() => normalizeSettings({ baseUrl: 'http://example.com/v1' }));
   assert.throws(() => normalizeSettings({ contextWindow: 4096, maxOutputTokens: 4096 }));
 });
+
+test('a stream cut short is rejected instead of being committed as a complete response', async () => {
+  const provider = await mockProvider((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.end('data: {"choices":[{"delta":{"content":"未完成"}}]}\n\n');
+  });
+  try { await assert.rejects(chatCompletion(provider.settings, [], { onDelta() {} }), /意外结束/); }
+  finally { await provider.close(); }
+});

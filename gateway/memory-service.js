@@ -25,6 +25,7 @@ class MemoryService {
     this.stopped = false;
     this.controller = null;
     this.timer = null;
+    this.lastError = '';
   }
 
   // Schedule one worker without overlapping provider calls or blocking foreground replies.
@@ -32,6 +33,7 @@ class MemoryService {
     if (this.running || this.stopped || !this.getSettings().autoMemory) return;
     this.running = true;
     this.drain().catch(error => {
+      this.lastError = error.message;
       try { this.storage.transaction(() => this.storage.setMeta('last_memory_error', error.message)); } catch { /* Failure stays visible on the next database operation. */ }
     }).finally(() => { this.running = false; });
   }
@@ -59,8 +61,10 @@ class MemoryService {
         if (result.finishReason === 'length') throw new Error('记忆提取达到输出上限，未写入不完整结果。');
         const facts = parseFacts(result.text);
         const count = this.storage.applyJob(job, facts);
+        this.lastError = '';
         this.storage.transaction(() => { this.storage.setMeta('last_memory_error', ''); this.storage.setMeta('last_memory_result', `已写入 ${count} 条记忆`); });
       } catch (error) {
+        this.lastError = error.message;
         const attempts = job.attempts + 1;
         this.storage.markJob(job.id, attempts >= 3 ? 'failed' : 'pending', error.message);
         this.storage.transaction(() => this.storage.setMeta('last_memory_error', error.message));
