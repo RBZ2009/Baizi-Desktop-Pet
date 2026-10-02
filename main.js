@@ -825,7 +825,8 @@ ipcMain.handle('gateway-settings-save', (event, payload) => { requireManagementS
 ipcMain.handle('gateway-status', event => { requireManagementSender(event); return getGateway().request('/health'); });
 ipcMain.handle('gateway-manage', (event, { action, payload } = {}) => {
   requireManagementSender(event);
-  const routes = { test: '/test' };
+  const routes = { test: '/test', sessions: '/sessions', history: '/history', newSession: '/session/new', selectSession: '/session/select',
+    memories: '/memories', saveMemory: '/memory/save', deleteMemory: '/memory/delete', memorySource: '/memory/source', retryMemory: '/memory/retry', export: '/export' };
   if (!routes[action]) throw new Error('不支持的管理操作。');
   return getGateway().request(routes[action], payload || {});
 });

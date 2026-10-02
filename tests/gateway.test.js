@@ -13,7 +13,7 @@ const { normalizeSettings } = require('../gateway/settings');
 async function mockProvider(handler) {
   const server = http.createServer(handler);
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  return { settings: normalizeSettings({ baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'test-only' }),
+  return { settings: normalizeSettings({ baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'test-only', autoMemory: false }),
     close: async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } };
 }
 
@@ -67,7 +67,7 @@ test('gateway emits text completion and can abort an in-flight request', async (
     const response = await call('你好');
     const events = [];
     for await (const data of readSse(response.body)) events.push(JSON.parse(data));
-    assert.deepEqual(events.map(event => event.type), ['start', 'chunk', 'done']);
+    assert.deepEqual(events.map(event => event.type), ['start', 'context', 'chunk', 'done']);
     assert.equal(events.at(-1).text, '你好呀');
     const pending = await call('等待');
     await fetch(`http://127.0.0.1:${gateway.port}/cancel`, { method: 'POST', headers, body: '{}' });
