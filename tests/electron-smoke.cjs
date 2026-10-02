@@ -58,6 +58,23 @@ app.whenReady().then(async () => {
     require(path.join(root, 'main.js'));
     const pet = await until(() => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().endsWith('/index.html')));
     await until(() => pet.webContents.executeJavaScript('!!window.desktopPet && !!document.getElementById("chat-input")'));
+    const baseSize = pet.getSize();
+    await pet.webContents.executeJavaScript(`document.getElementById('pet-container').dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:40,clientY:12}))`);
+    await until(() => pet.webContents.executeJavaScript('document.getElementById("chat-panel").classList.contains("show")'));
+    await until(() => pet.getSize()[0] === baseSize[0] + 300);
+    assert.equal(await pet.webContents.executeJavaScript('document.getElementById("pet-container").getBoundingClientRect().width'), baseSize[0]);
+    const chatMetrics = await pet.webContents.executeJavaScript(`(() => {
+      const panel = document.getElementById('chat-panel').getBoundingClientRect();
+      const send = document.getElementById('chat-send').getBoundingClientRect();
+      const stop = document.getElementById('chat-stop').getBoundingClientRect();
+      return { panelWidth: panel.width, sendWidth: send.width, stopWidth: stop.width };
+    })()`);
+    assert.ok(chatMetrics.panelWidth >= 250);
+    assert.ok(chatMetrics.sendWidth >= 100);
+    assert.ok(chatMetrics.stopWidth >= 100);
+    await pet.webContents.executeJavaScript(`document.getElementById('pet-container').dispatchEvent(new MouseEvent('click',{bubbles:true,clientX:40,clientY:12}))`);
+    await until(async () => !(await pet.webContents.executeJavaScript('document.getElementById("chat-panel").classList.contains("show")')));
+    await until(() => pet.getSize()[0] === baseSize[0]);
     await pet.webContents.executeJavaScript('window.desktopPet.openDialogueSettings()');
     const panel = await until(() => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().endsWith('/ui/dialogue.html')));
     await until(() => panel.webContents.executeJavaScript('!!window.dialogue && !!document.getElementById("baseUrl").value'));

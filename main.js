@@ -14,30 +14,30 @@ let speechWindow = null;
 let tray = null;
 let isPaused = false;
 let currentSizeMode = 'medium';
+let chatPanelExpanded = false;
 
 const sizePresets = {
-  // small: 缩小窗口的同时，避免人物过小造成大面积空白可点击区
-  small: { width: 132, height: 172, scale: 0.7 },
-  medium: { width: 320, height: 420, scale: 1 },
-  large: { width: 560, height: 840, scale: 1.5 }
+  small: { width: 132, height: 172 },
+  medium: { width: 206, height: 333 },
+  large: { width: 560, height: 800 }
 };
 
 const configPath = path.join(app.getPath('userData'), 'pet-config.json');
 const defaultConfig = {
   autoLaunch: true,
-  sizeMode: 'medium',
+  sizeMode: 'small',
   breathingMode: 'subtle',
   behaviorStyle: 'balanced',
   showPetBounds: false,
   sizePresets: {
     small: { width: 132, height: 172 },
-    medium: { width: 320, height: 420 },
-    large: { width: 560, height: 840 }
+    medium: { width: 206, height: 333 },
+    large: { width: 560, height: 800 }
   },
   sizeScaleOverrides: {
-    small: 1,
-    medium: 1,
-    large: 1
+    small: 2,
+    medium: 1.5,
+    large: 0.7
   },
   dialogue: {
     bubbleAnchorX: 0.56, bubbleAnchorY: 0.34,
@@ -146,10 +146,12 @@ function setPaused(nextPaused) {
   refreshTrayMenu();
 }
 
-function clampWindowPosition(x, y, targetWindow = mainWindow) {
+function clampWindowPosition(x, y, targetWindow = mainWindow, targetSize = null) {
   if (!targetWindow || targetWindow.isDestroyed()) return { x: Math.round(x), y: Math.round(y) };
 
-  const [width, height] = targetWindow.getSize();
+  const [currentWidth, currentHeight] = targetWindow.getSize();
+  const width = targetSize?.width || currentWidth;
+  const height = targetSize?.height || currentHeight;
   const candidate = {
     x: Math.round(Number(x) || 0),
     y: Math.round(Number(y) || 0),
@@ -214,11 +216,15 @@ function applySizeMode(nextMode, { persist = true, restart = false } = {}) {
   }
 
   const [x, y] = mainWindow.getPosition();
-  const pos = clampWindowPosition(x, y);
-  mainWindow.setSize(preset.width, preset.height);
+  const pos = clampWindowPosition(x, y, mainWindow, {
+    width: preset.width + (chatPanelExpanded ? 300 : 0),
+    height: preset.height
+  });
+  mainWindow.setSize(preset.width + (chatPanelExpanded ? 300 : 0), preset.height);
   mainWindow.setPosition(pos.x, pos.y);
 
   notifySizeChanged();
+  mainWindow.webContents.send('pet-chat-panel-layout', { petWidth: preset.width });
   refreshTrayMenu();
 }
 
@@ -366,6 +372,7 @@ function createWindow() {
 
   mainWindow.webContents.on('did-finish-load', () => {
     notifySizeChanged();
+    mainWindow.webContents.send('pet-chat-panel-layout', { petWidth: preset.width });
 
     const config = loadConfig();
     mainWindow.webContents.send('pet-breathing-mode-changed', config.breathingMode || 'subtle');
@@ -656,6 +663,19 @@ ipcMain.handle('pet-toggle-pause', () => {
 
 ipcMain.handle('pet-get-pause-state', () => isPaused);
 ipcMain.handle('pet-get-size-mode', () => currentSizeMode);
+ipcMain.handle('pet-set-chat-panel-visible', (event, visible) => {
+  if (event.sender !== mainWindow?.webContents || !mainWindow || mainWindow.isDestroyed()) return { ok: false };
+  chatPanelExpanded = !!visible;
+  const preset = getSizePreset(currentSizeMode);
+  const [x, y] = mainWindow.getPosition();
+  const width = preset.width + (chatPanelExpanded ? 300 : 0);
+  const height = preset.height;
+  const bounds = clampWindowPosition(x, y, mainWindow, { width, height });
+  mainWindow.setSize(width, height);
+  mainWindow.setPosition(bounds.x, bounds.y);
+  syncSpeechWindowPosition();
+  return { ok: true, petWidth: preset.width, expanded: chatPanelExpanded };
+});
 ipcMain.handle('pet-get-breathing-mode', () => loadConfig().breathingMode || 'subtle');
 ipcMain.handle('pet-get-show-pet-bounds', () => !!loadConfig().showPetBounds);
 ipcMain.handle('pet-get-dialogue-settings', () => {

@@ -15,6 +15,7 @@ import {
 } from '@pixiv/three-vrm-animation';
 
 const petContainer = document.getElementById('pet-container');
+const petShell = document.getElementById('pet-shell');
 const canvas = document.getElementById('pet-canvas');
 const fallback = document.getElementById('pet-fallback');
 const debugEl = document.getElementById('debug');
@@ -1268,19 +1269,30 @@ function setChatPanelVisible(visible) {
   chatPanelVisible = !!visible;
   if (!chatPanelEl) return;
   chatPanelEl.classList.toggle('show', chatPanelVisible);
+  petShell?.classList.toggle('chat-open', chatPanelVisible);
 
-  // 对话框显隐不改变 pet-container 尺寸，只需轻量同步一次相机
+  const layoutRequest = window.desktopPet?.setChatPanelVisible?.(chatPanelVisible);
+  layoutRequest?.then(layout => {
+    if (!layout?.ok) return;
+    petShell?.style.setProperty('--pet-frame-width', `${layout.petWidth}px`);
+    window.requestAnimationFrame(resize);
+  }).catch(() => {});
+
   window.requestAnimationFrame(() => {
     resize();
-    if (vrm) {
-      fitVRMToWindow();
-    }
   });
 
   if (chatPanelVisible && chatInputEl) {
     window.setTimeout(() => chatInputEl.focus(), 0);
+  } else if (document.activeElement === chatInputEl) {
+    chatInputEl.blur();
   }
 }
+
+window.desktopPet?.onChatPanelLayout?.(layout => {
+  if (!Number.isFinite(layout?.petWidth)) return;
+  petShell?.style.setProperty('--pet-frame-width', `${layout.petWidth}px`);
+});
 
 function formatSpeechText(raw) {
   if (!raw) return '';
@@ -1597,6 +1609,15 @@ petContainer.addEventListener('click', (e) => {
   const rect = petContainer.getBoundingClientRect();
   spawnParticles(rect, 7);
 
+  const localY = e.clientY - rect.top;
+  const h = rect.height || 1;
+  const isHeadZone = localY <= h / 3;
+
+  if (isHeadZone) {
+    setChatPanelVisible(!chatPanelVisible);
+    return;
+  }
+
   if (!vrm) {
     fallback.classList.add('active');
     restartClassAnimation(fallback, 'pat');
@@ -1604,16 +1625,7 @@ petContainer.addEventListener('click', (e) => {
   }
 
   // 新创意触发：按点击区域决定动作
-  const localY = e.clientY - rect.top;
-  const h = rect.height || 1;
-  const isHeadZone = localY <= h / 3;
   const isLegZone = localY >= (h * 2) / 3;
-
-  // 头部：弹出对话框
-  if (isHeadZone) {
-    setChatPanelVisible(true);
-    return;
-  }
 
   // 腿部（下三分之一）：触发 walk
   if (isLegZone) {
@@ -1744,4 +1756,3 @@ if (chatInputEl) {
     }
   });
 }
-

@@ -29,6 +29,12 @@ contextBridge.exposeInMainWorld('desktopPet', {
     ipcRenderer.on('pet-size-changed', handler);
     return () => ipcRenderer.removeListener('pet-size-changed', handler);
   },
+  setChatPanelVisible: visible => ipcRenderer.invoke('pet-set-chat-panel-visible', !!visible),
+  onChatPanelLayout: callback => {
+    const handler = (_event, layout) => callback(layout);
+    ipcRenderer.on('pet-chat-panel-layout', handler);
+    return () => ipcRenderer.removeListener('pet-chat-panel-layout', handler);
+  },
   getBreathingMode: () => ipcRenderer.invoke('pet-get-breathing-mode'),
   onBreathingModeChanged: (callback) => {
     const handler = (_event, mode) => callback(mode);
