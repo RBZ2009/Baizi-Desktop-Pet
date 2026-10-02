@@ -1,0 +1,35 @@
+# macOS and editor files
+.DS_Store
+._*
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Installed dependencies and Python caches
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Build outputs and runtime logs
+dist/
+*.log
+
+# Local credentials and application settings
+.env
+.env.*
+!.env.example
+pet-config.json
+*.pem
+*.key
+
+# Legacy standalone probes contain embedded credentials; keep local only.
+/tts_probe.py
+/tts_probe_haha.py
+/白子语言.py
+
+# Machine-specific Windows shortcuts
+*.lnk

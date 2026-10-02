@@ -1,0 +1,48 @@
+{
+  "name": "desktop-pet",
+  "version": "1.0.0",
+  "description": "Simple Electron desktop pet (桌宠)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:silent": "electron . --disable-logging",
+    "pack:mac": "electron-builder --mac dir",
+    "dist:mac": "electron-builder --mac"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@pixiv/three-vrm": "^3.4.2",
+    "@pixiv/three-vrm-animation": "^3.5.0",
+    "three": "^0.180.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.desktoppet.baizi",
+    "productName": "白子桌宠",
+    "asar": true,
+    "disableDefaultIgnoredFiles": true,
+    "files": [
+      "**/*",
+      "!**/.venv{,/**/*}",
+      "!**/*.log",
+      "!**/.DS_Store"
+    ],
+    "mac": {
+      "category": "public.app-category.entertainment",
+      "disableDefaultIgnoredFiles": true,
+      "identity": null,
+      "target": [
+        "dir",
+        "dmg"
+      ],
+      "icon": "assets/icon-mac.png"
+    },
+    "directories": {
+      "output": "dist"
+    }
+  }
+}
