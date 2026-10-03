@@ -68,11 +68,11 @@ async function createGateway({ token, settings, dataDir, legacyHistory = [], wor
           active?.abort(); await chat.settle();
           return respond(req.url === '/session/new' ? storage.newSession() : storage.selectSession(String(body.id || '')));
         }
-      if (req.url === '/memories') return respond({ memories: storage.memories() });
-      if (req.url === '/profile') return respond(storage.userProfileStatus());
-      if (req.url === '/profile/save') return respond(storage.updateUserProfile(body.fields, 'manual'));
-      if (req.url === '/profile/clear') return respond(storage.clearUserProfileField(String(body.field || '')));
-      if (req.url === '/profile/proactive') return respond(storage.setProfileProactiveEnabled(!!body.enabled));
+        if (req.url === '/memories') return respond({ memories: storage.memories() });
+        if (req.url === '/profile') return respond(storage.userProfileStatus());
+        if (req.url === '/profile/save') return respond(storage.updateUserProfile(body.fields, 'manual'));
+        if (req.url === '/profile/clear') return respond(storage.clearUserProfileField(String(body.field || '')));
+        if (req.url === '/profile/proactive') return respond(storage.setProfileProactiveEnabled(!!body.enabled));
         if (req.url === '/memory/save') return respond(storage.saveMemory(body));
         if (req.url === '/memory/delete') return respond(storage.deleteMemory(String(body.id || '')));
         if (req.url === '/memory/source') {

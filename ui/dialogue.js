@@ -61,7 +61,7 @@ loadSettings().catch(error => showNotice(error.message));
 async function loadProfile() {
   const result = await api.manage('profile');
   const list = document.getElementById('profile-list'); list.replaceChildren();
-  document.getElementById('profile-status').textContent = `已填写 ${Object.values(result.fields).filter(field => field.value).length} 项；待完善 ${result.missing.length + result.optionalMissing.length} 项。${result.proactiveEnabled ? '主动完善已开启。' : '主动完善已关闭。'}`;
+  document.getElementById('profile-status').textContent = `已填写 ${Object.values(result.fields).filter(field => field.value).length} 项；待完善 ${result.missing.length} 项。${result.proactiveEnabled ? '主动完善已开启。' : '主动完善已关闭。'}`;
   for (const [field, item] of Object.entries(result.fields)) {
     const wrapper = document.createElement('div'); wrapper.className = 'card';
     const label = document.createElement('label'); label.textContent = `${item.label}${item.optional ? '（可选）' : ''}`;
