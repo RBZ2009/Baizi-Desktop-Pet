@@ -101,6 +101,7 @@ function getAutoLaunchEnabled() {
   return app.getLoginItemSettings().openAtLogin;
 }
 
+// Follow the role anchor while keeping the complete reply window on the active display.
 function syncSpeechWindowPosition() {
   if (!mainWindow || mainWindow.isDestroyed() || !speechWindow || speechWindow.isDestroyed()) return;
   const [x, y] = mainWindow.getPosition();
@@ -130,23 +131,25 @@ function syncSpeechWindowPosition() {
   const clampedY = Math.min(Math.max(area.y + 8, preferredY), Math.max(area.y + 8, area.y + area.height - sh - 8));
 
   speechWindow.setPosition(Math.round(clampedX), Math.round(clampedY));
-  speechWindow.webContents.send('speech-placement', { below: placeBelow });
+  speechWindow.webContents.send('speech-placement', { below: placeBelow, pointerX: x + Math.round(w * ax) - clampedX - 10 });
 }
 
+// Keep the independent composer centered on the role and visible near display edges.
 function syncChatWindowPosition() {
   if (!mainWindow || mainWindow.isDestroyed() || !chatWindow || chatWindow.isDestroyed() || !chatWindow.isVisible()) return;
   const [x, y] = mainWindow.getPosition();
   const preset = getSizePreset(currentSizeMode);
-  const [chatWidth] = chatWindow.getSize();
+  const [chatWidth, chatHeight] = chatWindow.getSize();
   const chatX = x + Math.round((preset.width - chatWidth) / 2);
   const chatY = y + Math.round(preset.height * 0.61);
-  const area = screen.getDisplayMatching({ x: chatX, y: chatY, width: chatWidth, height: 40 })?.workArea || screen.getPrimaryDisplay().workArea;
+  const area = screen.getDisplayMatching(mainWindow.getBounds())?.workArea || screen.getPrimaryDisplay().workArea;
   chatWindow.setPosition(
     Math.min(Math.max(area.x, chatX), Math.max(area.x, area.x + area.width - chatWidth)),
-    Math.min(Math.max(area.y, chatY), Math.max(area.y, area.y + area.height - 40))
+    Math.min(Math.max(area.y, chatY), Math.max(area.y, area.y + area.height - chatHeight))
   );
 }
 
+// Open a separate input overlay so input growth never resizes the VRM canvas.
 function createChatWindow() {
   if (chatWindow && !chatWindow.isDestroyed()) return chatWindow;
   chatWindow = new BrowserWindow({
@@ -162,7 +165,7 @@ function createChatWindow() {
     webPreferences: { nodeIntegration: false, contextIsolation: true, preload: __dirname + '/preload.js' }
   });
   chatWindow.setAlwaysOnTop(true, 'screen-saver');
-  chatWindow.loadFile(path.join(__dirname, 'chat.html'));
+  chatWindow.loadFile(path.join(__dirname, 'ui/chat.html'));
   chatWindow.setMenuBarVisibility(false);
   chatWindow.webContents.on('did-finish-load', () => {
     const preset = getSizePreset(currentSizeMode);
@@ -252,6 +255,10 @@ function showPetWindow() {
 function notifySizeChanged() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send('pet-size-changed', currentSizeMode);
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    const [petWidth, petHeight] = mainWindow.getSize();
+    chatWindow.webContents.send('pet-chat-window-anchor', { petWidth, petHeight });
+  }
 }
 
 function applySizeMode(nextMode, { persist = true, restart = false } = {}) {
@@ -291,6 +298,7 @@ function applySizeMode(nextMode, { persist = true, restart = false } = {}) {
   refreshTrayMenu();
 }
 
+// Load the reply surface through its own minimal sandboxed bridge.
 function createSpeechWindow() {
   speechWindow = new BrowserWindow({
     width: 280,
@@ -303,72 +311,15 @@ function createSpeechWindow() {
     hasShadow: false,
     focusable: false,
     webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: path.join(__dirname, 'ui/speech-preload.js')
     }
   });
 
-  const html = `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><style>
-    html,body{margin:0;padding:0;background:transparent;overflow:hidden}
-    #bubble{position:absolute;left:0;bottom:0;width:100%;min-height:44px;box-sizing:border-box;padding:9px 13px;border-radius:15px;
-      background:rgba(233,242,250,.92);color:#1f2937;font-size:12px;line-height:1.46;border:1px solid rgba(255,255,255,.92);
-      box-shadow:0 10px 26px rgba(28,45,63,.2),inset 0 1px rgba(255,255,255,.9);backdrop-filter:blur(18px) saturate(135%);
-      -webkit-backdrop-filter:blur(18px) saturate(135%);white-space:pre-wrap;overflow:hidden;display:none}
-    #bubble.show{display:block}
-    #bubble.holdable{cursor:pointer}
-    #bubble:after{content:'';position:absolute;left:22px;bottom:-7px;width:12px;height:12px;background:rgba(233,242,250,.92);
-      border-right:1px solid rgba(255,255,255,.92);border-bottom:1px solid rgba(255,255,255,.92);transform:rotate(45deg)}
-    #bubble.below{top:0;bottom:auto}
-    #bubble.below:after{top:-7px;bottom:auto;border-right:0;border-bottom:0;border-left:1px solid rgba(255,255,255,.92);border-top:1px solid rgba(255,255,255,.92)}
-  </style></head><body><div id="bubble"></div><script>
-    const { ipcRenderer } = require('electron');
-    const bubble = document.getElementById('bubble');
-    let closable = false;
-    let holdTimer = null;
-
-    const clearHold = () => {
-      if (holdTimer) {
-        clearTimeout(holdTimer);
-        holdTimer = null;
-      }
-    };
-
-    bubble.addEventListener('mousedown', () => {
-      if (!closable) return;
-      clearHold();
-      holdTimer = setTimeout(() => {
-        ipcRenderer.send('speech-hide');
-      }, 700);
-    });
-    bubble.addEventListener('mouseup', clearHold);
-    bubble.addEventListener('mouseleave', clearHold);
-
-    ipcRenderer.on('speech-set-text', (_e, payload) => {
-      const text = typeof payload === 'string' ? payload : (payload?.text || '');
-      closable = typeof payload === 'object' ? !!payload.closable : false;
-      bubble.textContent = text || '';
-      bubble.classList.add('show');
-      bubble.classList.toggle('holdable', closable);
-      const len = (text || '').length;
-      const w = Math.min(560, Math.max(180, 180 + Math.floor(len / 12) * 26));
-      bubble.style.width = w + 'px';
-      setTimeout(() => {
-        const h = Math.min(360, Math.max(56, bubble.scrollHeight + 8));
-        ipcRenderer.send('speech-window-resize', { width: w, height: h });
-      }, 0);
-    });
-    ipcRenderer.on('speech-placement', (_e, payload) => {
-      bubble.classList.toggle('below', !!payload?.below);
-    });
-    ipcRenderer.on('speech-hide', () => {
-      bubble.classList.remove('show');
-      bubble.classList.remove('holdable');
-      closable = false;
-      clearHold();
-    });
-  </script></body></html>`;
-
-  speechWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  speechWindow.setAlwaysOnTop(true, 'screen-saver');
+  speechWindow.loadFile(path.join(__dirname, 'ui/speech.html'));
   speechWindow.setIgnoreMouseEvents(true);
   speechWindow.on('closed', () => { speechWindow = null; });
 }
@@ -428,7 +379,9 @@ function createWindow() {
   });
 
   mainWindow.on('resize', () => {
+    syncSpeechWindowPosition();
     syncChatWindowPosition();
+    notifySizeChanged();
   });
 
   mainWindow.on('show', () => {
@@ -443,6 +396,10 @@ function createWindow() {
       speechWindow.setAlwaysOnTop(true, 'screen-saver');
       speechWindow.showInactive();
       syncSpeechWindowPosition();
+    }
+    if (chatPanelVisible && chatWindow && !chatWindow.isDestroyed() && !isPaused) {
+      chatWindow.setAlwaysOnTop(true, 'screen-saver');
+      chatWindow.showInactive();
     }
   });
 
@@ -956,7 +913,8 @@ ipcMain.on('pet-chat-query-stream', async (event, payload) => {
   }
 });
 
-ipcMain.on('speech-window-resize', (_event, size) => {
+ipcMain.on('speech-window-resize', (event, size) => {
+  if (event.sender !== speechWindow?.webContents) return;
   if (!speechWindow || speechWindow.isDestroyed()) return;
   const w = Math.max(160, Math.min(560, Math.round(Number(size?.width) || 240)));
   const h = Math.max(52, Math.min(360, Math.round(Number(size?.height) || 96)));
@@ -964,7 +922,8 @@ ipcMain.on('speech-window-resize', (_event, size) => {
   syncSpeechWindowPosition();
 });
 
-ipcMain.on('speech-set-text', (_event, payload) => {
+ipcMain.on('speech-set-text', (event, payload) => {
+  if (event.sender !== mainWindow?.webContents && event.sender !== chatWindow?.webContents) return;
   if (!speechWindow || speechWindow.isDestroyed()) return;
   const text = typeof payload === 'string' ? payload : (payload?.text || '');
   const closable = typeof payload === 'object' ? !!payload.closable : false;
@@ -973,13 +932,17 @@ ipcMain.on('speech-set-text', (_event, payload) => {
   } else {
     speechWindow.setIgnoreMouseEvents(true, { forward: true });
   }
-  speechWindow.webContents.send('speech-set-text', { text, closable });
+  const [roleWidth] = mainWindow.getSize();
+  const area = screen.getDisplayMatching(mainWindow.getBounds()).workArea;
+  speechWindow.webContents.send('speech-set-text', { text, closable, roleWidth,
+    charsPerLine: payload?.charsPerLine, maxWidth: Math.max(160, area.width - 36), maxHeight: Math.max(80, area.height - 36) });
   speechWindow.setAlwaysOnTop(true, 'screen-saver');
   if (!isPaused) speechWindow.showInactive();
   syncSpeechWindowPosition();
 });
 
-ipcMain.on('speech-hide', () => {
+ipcMain.on('speech-hide', event => {
+  if (![mainWindow?.webContents, chatWindow?.webContents, speechWindow?.webContents].includes(event.sender)) return;
   if (!speechWindow || speechWindow.isDestroyed()) return;
   speechWindow.webContents.send('speech-hide');
   speechWindow.setIgnoreMouseEvents(true, { forward: true });

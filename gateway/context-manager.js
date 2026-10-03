@@ -41,9 +41,9 @@ class ContextManager {
   constructor(storage, persona) { this.storage = storage; this.persona = persona; }
 
   // Assemble context under the configured input budget, using summaries only for completed turns.
-  async build(sessionId, prompt, settings, signal, inputReserve = 0) {
+  async build(sessionId, prompt, settings, signal, inputReserve = 0, runtimeInstructions = '') {
     const budget = settings.contextWindow - settings.maxOutputTokens - 1024 - inputReserve;
-    const fixed = [{ role: 'system', content: this.persona + '\n当前时间：' + new Date().toLocaleString('zh-CN', { timeZone: settings.timeZone }) + `（${settings.timeZone}）` }];
+    const fixed = [{ role: 'system', content: this.persona + '\n当前时间：' + new Date().toLocaleString('zh-CN', { timeZone: settings.timeZone }) + `（${settings.timeZone}）` + '\n' + runtimeInstructions }];
     const current = { role: 'user', content: prompt };
     if (tokenBound([...fixed, current]) > budget) throw new Error('这条消息超过模型上下文预算，请缩短消息或调整上下文窗口。');
     let session = this.storage.all('SELECT * FROM sessions WHERE id=?', [sessionId])[0];

@@ -9,7 +9,7 @@ const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
 test('chat overlay ignores stale replies and completes text independently of speech', () => {
-  const source = fs.readFileSync(require.resolve('../chat-renderer.js'), 'utf8');
+  const source = fs.readFileSync(require.resolve('../ui/chat.js'), 'utf8');
   const listeners = {}; const shown = []; const streams = []; const keyHandlers = [];
   const input = { value: '', style: {}, addEventListener(type, callback) { if (type === 'keydown') keyHandlers.push(callback); } };
   const panel = { style: { setProperty() {} }, classList: { toggle() {} }, getBoundingClientRect: () => ({ height: 42 }) };

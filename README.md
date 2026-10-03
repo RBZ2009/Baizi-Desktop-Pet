@@ -30,9 +30,9 @@ npm ci
 npm start
 ```
 
-macOS 也可双击 `双击_第一次安装并启动.command` 准备依赖，之后双击 `双击_启动桌宠.command`。
+macOS 也可双击 `install-start.command` 准备依赖，之后双击 `start.command`。环境准备脚本位于 `scripts/`，Windows 对应 `scripts/setup-env.ps1`。
 若已安装 Homebrew，安装脚本可自动安装缺失的 Node；否则会提示手动安装 Node。
-当前聊天和系统语音不使用 Python。仓库中的旧 Python TTS 示例仅作历史参考，不被应用调用或打包。
+当前聊天和系统语音不使用 Python。`archive/legacy-tts/` 中的旧 Python TTS 示例仅作历史参考，不被应用调用或打包。
 
 下载的 `.command` 被 macOS 拦截时，可在项目目录执行：
 
@@ -111,10 +111,12 @@ main.js / preload.js / renderer.js  桌宠窗口、交互与受控 IPC
    memory-service.js               后台提取与有限重试
    storage.js                      SQLite 事务和原子落盘
  prompts/baizi.md                 角色设定
- ui/                               对话设置、记忆和历史管理页面
+ ui/                               输入框、回复气泡、对话设置与各自脚本
+ scripts/                          Node 环境准备和启动辅助脚本
  tests/                            模拟服务及 Electron 集成验证
  archive/legacy-tts/              不参与运行的旧版 Python/Qwen TTS 示例
  archive/legacy-launch/           不参与运行的旧版 Windows 启动脚本
+ archive/legacy-assets/           不再使用的旧图标
  docs/VOICE_ARCHITECTURE.md       实时语音接入边界和实施顺序
  docs/PERSONA_SOURCES.md          角色资料来源和原创桌宠设定
 ```
@@ -122,6 +124,8 @@ main.js / preload.js / renderer.js  桌宠窗口、交互与受控 IPC
 3D 模型放在 `assets/model.vrm`，缺失时回退到 `assets/pet.png`。页面实际引用的 `vendor/three/` 随源码和应用一起保留。
 
 ## 验收建议
+
+本轮 UI、工具和动作的源码版验收步骤见 [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md)。退出旧应用后使用 `npm start` 或 `start.command`；`dist/` 中已有的 `.app` 未重新构建。
 
 1. 配置自己的模型，测试连接后与白子聊天。
 2. 告诉白子你的称呼和偏好，等待长期记忆页面出现记录，检查来源。

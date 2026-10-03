@@ -1,7 +1,7 @@
 # Responsibility: Install the Node.js development runtime on Windows.
 # Implementation: 1. Reuse Node when present. 2. Install through winget when needed. 3. Restore locked dependencies without Python.
 $ErrorActionPreference = "Stop"
-$projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$projectRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $projectRoot
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { throw "请安装 Node.js 22.12 或更新版本：https://nodejs.org/" }

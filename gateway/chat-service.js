@@ -41,9 +41,10 @@ class ChatService {
         const schemaBytes = tools.length ? Buffer.byteLength(JSON.stringify(tools)) + 128 : 0;
         // Reserve room for tool definitions and results without crowding out the persona/current prompt.
         if (schemaBytes + 2048 + Buffer.byteLength(this.context.persona + prompt) > inputBudget) tools = [];
-        const fixedBytes = tokenBound([{ role: 'system', content: this.context.persona }, { role: 'user', content: prompt }]) + 256;
+        const capabilities = tools.length ? `本轮可用工具：${tools.map(tool => tool.function.name).join('、')}。未列出的工具不可用；不能声称未开启的联网、诊断或动作已执行。` : '本轮没有工具权限（关闭或上下文空间不足）。不要声称已联网查询、运行命令或发出动作请求。';
+        const fixedBytes = tokenBound([{ role: 'system', content: this.context.persona + capabilities }, { role: 'user', content: prompt }]) + 256;
         const toolReserve = tools.length ? schemaBytes + Math.max(0, Math.min(4096, Math.floor(inputBudget * 0.2), inputBudget - fixedBytes - schemaBytes - 512)) : 0;
-        const context = await this.context.build(session.id, prompt, settings, signal, toolReserve);
+        const context = await this.context.build(session.id, prompt, settings, signal, toolReserve, capabilities);
         send({ type: 'context', ...context.stats });
         const messages = [...context.messages];
         let result;

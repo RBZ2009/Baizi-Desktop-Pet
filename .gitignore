@@ -30,6 +30,7 @@ pet-config.json
 /tts_probe.py
 /tts_probe_haha.py
 /白子语言.py
+/archive/local-only/
 
 # Machine-specific Windows shortcuts
 *.lnk

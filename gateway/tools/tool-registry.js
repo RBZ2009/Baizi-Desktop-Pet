@@ -146,6 +146,7 @@ function validateArguments(definition, args) {
   const schema = definition.function.parameters;
   for (const key of schema.required || []) if (!Object.hasOwn(args, key)) throw new Error(`工具缺少参数：${key}。`);
   for (const [key, value] of Object.entries(args)) {
+    if (!Object.hasOwn(schema.properties, key)) throw new Error(`工具参数无效：${key}。`);
     const property = schema.properties[key];
     if (!property || (property.type === 'string' ? typeof value !== 'string' : !Number.isInteger(value))) throw new Error(`工具参数无效：${key}。`);
     if (property.enum && !property.enum.includes(value)) throw new Error(key === 'command' ? '该命令不在只读允许列表中。' : key === 'action' ? '桌宠动作不在允许列表中。' : `参数 ${key} 不在允许列表中。`);

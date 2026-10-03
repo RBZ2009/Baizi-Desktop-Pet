@@ -19,7 +19,6 @@ const petShell = document.getElementById('pet-shell');
 const canvas = document.getElementById('pet-canvas');
 const fallback = document.getElementById('pet-fallback');
 const debugEl = document.getElementById('debug');
-const speechBubbleEl = document.getElementById('speech-bubble');
 let showPetBounds = false;
 
 function rand(min, max) {
