@@ -10,6 +10,7 @@ const defaults = {
   autoMemory: true, memoryModel: '', toolsEnabled: true, commandToolsEnabled: false, ttsEnabled: false,
   ttsVoice: 'Tingting', ttsRate: 180, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   profileEnabled: true, profileProactiveQuestions: true, profileQuestionCooldownHours: 168,
+  workspaceRoot: '', workspacePermissions: [], proactiveEnabled: true, proactiveIntervalMinutes: 120,
   voiceApiKey: '', voiceTranscriptionApiKey: '', voiceSynthesisApiKey: '', voice: voiceDefaults
 };
 
@@ -41,6 +42,10 @@ function normalizeSettings(input = {}) {
     if (result[key].length > 4096 || /[\r\n]/.test(result[key])) throw new Error('语音 API Key 无效。');
   }
   result.voice = normalizeVoiceSettings(result.voice);
+  result.workspaceRoot = String(result.workspaceRoot || '').trim();
+  result.workspacePermissions = Array.isArray(result.workspacePermissions) ? result.workspacePermissions : [];
+  result.proactiveEnabled = result.proactiveEnabled !== false;
+  result.proactiveIntervalMinutes = Math.max(30, Math.min(1440, Math.floor(Number(result.proactiveIntervalMinutes) || 120)));
   const cooldown = Number(result.profileQuestionCooldownHours);
   if (!Number.isFinite(cooldown) || cooldown < 1 || cooldown > 8760) throw new Error('用户档案主动询问冷却时间必须在 1～8760 小时之间。');
   result.profileQuestionCooldownHours = Math.floor(cooldown);

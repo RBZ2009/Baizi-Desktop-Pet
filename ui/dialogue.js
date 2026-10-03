@@ -34,7 +34,35 @@ async function loadSettings() {
   document.getElementById('voiceSynthesisApiKey').placeholder = settings.hasVoiceSynthesisApiKey ? '已保存独立 Key；留空保留' : '可选，覆盖通用 Key';
   document.getElementById('apiKey').placeholder = settings.hasApiKey ? '已保存 Key；留空保留' : '请输入 API Key';
   if (settings.settingsError) showNotice(settings.settingsError);
+  document.getElementById('proactiveEnabled').checked = settings.proactiveEnabled !== false;
+  document.getElementById('proactiveIntervalMinutes').value = settings.proactiveIntervalMinutes || 120;
+  try { await loadWorkspace(); } catch (error) { showNotice(`工作区状态读取失败：${error.message}`); }
 }
+
+// Render approvals independently from the model configuration save operation.
+async function loadWorkspace() {
+  const workspace = await api.workspace('get');
+  document.getElementById('workspace-root').textContent = `默认工作区：${workspace.workspaceRoot}`;
+  const pending = document.getElementById('workspace-pending'); pending.replaceChildren();
+  pending.append(Object.assign(document.createElement('h3'), { textContent: '待审批目录' }));
+  if (!workspace.pending.length) pending.append(Object.assign(document.createElement('p'), { className: 'muted', textContent: '暂无申请。' }));
+  for (const item of workspace.pending) {
+    const row = document.createElement('div'); row.className = 'card'; row.textContent = `${item.path}${item.reason ? `\n原因：${item.reason}` : ''}`;
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = '批准访问'; button.onclick = async () => { try { await api.workspace('approve', { path: item.path }); await loadWorkspace(); } catch (error) { showNotice(error.message); } };
+    row.append(button); pending.append(row);
+    const deny = document.createElement('button'); deny.type = 'button'; deny.textContent = '拒绝'; deny.onclick = async () => { try { await api.workspace('deny', { path: item.path }); await loadWorkspace(); } catch (error) { showNotice(error.message); } }; row.append(deny);
+  }
+  const approved = document.getElementById('workspace-approved'); approved.replaceChildren();
+  approved.append(Object.assign(document.createElement('h3'), { textContent: '已授权目录' }));
+  for (const item of workspace.approved) {
+    const row = document.createElement('div'); row.className = 'card'; row.textContent = item.path;
+    if (item.source !== 'default') { const button = document.createElement('button'); button.type = 'button'; button.textContent = '撤销'; button.onclick = async () => { try { await api.workspace('revoke', { path: item.path }); await loadWorkspace(); } catch (error) { showNotice(error.message); } }; row.append(button); }
+    approved.append(row);
+  }
+}
+// Refresh requests made while this settings window was already open.
+document.getElementById('refresh-workspace').addEventListener('click', () => loadWorkspace().catch(error => showNotice(error.message)));
+window.addEventListener('focus', () => loadWorkspace().catch(error => showNotice(error.message)));
 
 // Save a complete validated configuration and clear the key input afterward.
 document.getElementById('settings-form').addEventListener('submit', async event => {
@@ -65,6 +93,8 @@ document.getElementById('settings-form').addEventListener('submit', async event 
     settings.clearVoiceSynthesisApiKey = document.getElementById('clearVoiceSynthesisApiKey').checked;
     settings.apiKey = document.getElementById('apiKey').value;
     settings.requestTimeoutMs = Number(document.getElementById('timeoutSeconds').value) * 1000;
+    settings.proactiveEnabled = document.getElementById('proactiveEnabled').checked;
+    settings.proactiveIntervalMinutes = Number(document.getElementById('proactiveIntervalMinutes').value);
     await api.saveSettings(settings);
     document.getElementById('apiKey').value = '';
     document.getElementById('clearApiKey').checked = false;

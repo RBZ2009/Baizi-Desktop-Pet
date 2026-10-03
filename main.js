@@ -10,8 +10,21 @@ const { SpeechService } = require('./speech-service');
 const { VoiceSession } = require('./gateway/voice/session');
 const { DialogueState } = require('./dialogue-state');
 const { normalizeAction } = require('./gateway/actions/action-registry');
+const { ProactiveService } = require('./proactive-service');
 const speechService = new SpeechService();
 const voiceSession = new VoiceSession({ fallback: speechService });
+const proactiveService = new ProactiveService({
+  getIntervalMinutes: () => gatewayManager?.getSettings()?.proactiveIntervalMinutes || 120,
+  isEnabled: () => gatewayManager?.getSettings()?.proactiveEnabled !== false,
+  isPaused: () => isPaused, isBusy: () => !!activeDialogue, emit: payload => {
+  if (speechWindow && !speechWindow.isDestroyed()) {
+    speechWindow.setAlwaysOnTop(true, 'screen-saver');
+    speechWindow.webContents.send('speech-set-text', { ...payload, closable: true, messageId: `proactive-${Date.now()}`,
+      bubbleMode: loadConfig()?.dialogue?.bubbleMode === 'replace' ? 'replace' : 'stack' });
+    if (!isPaused) speechWindow.showInactive();
+    syncSpeechWindowPosition();
+  } else if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('pet-proactive-message', payload);
+} });
 
 let mainWindow;
 let speechWindow = null;
@@ -881,6 +894,12 @@ function requireManagementSender(event) {
 ipcMain.handle('gateway-open', () => { getGateway().openWindow(); });
 ipcMain.handle('gateway-settings-get', event => { requireManagementSender(event); return getGateway().getSettings(); });
 ipcMain.handle('gateway-settings-save', (event, payload) => { requireManagementSender(event); return getGateway().saveSettings(payload); });
+ipcMain.handle('workspace-get', event => { requireManagementSender(event); return getGateway().getWorkspace(); });
+ipcMain.handle('workspace-request', (event, payload) => { requireManagementSender(event); return getGateway().requestWorkspaceAccess(payload?.path, payload?.reason); });
+ipcMain.handle('workspace-approve', (event, payload) => { requireManagementSender(event); return getGateway().approveWorkspaceAccess(payload?.path); });
+ipcMain.handle('workspace-revoke', (event, payload) => { requireManagementSender(event); return getGateway().revokeWorkspaceAccess(payload?.path); });
+// Only the management window can reject a model's pending directory request.
+ipcMain.handle('workspace-deny', (event, payload) => { requireManagementSender(event); return getGateway().denyWorkspaceAccess(payload?.path); });
 // Expose speech preferences without keys to the composer before it requests microphone access.
 ipcMain.handle('voice-settings-get', event => {
   if (event.sender !== mainWindow?.webContents && event.sender !== chatWindow?.webContents) throw new Error('不允许此页面使用语音。');
@@ -1056,6 +1075,7 @@ app.whenReady().then(() => {
   applyAutoLaunch(config.autoLaunch);
   createWindow();
   createTray();
+  proactiveService.start();
   getGateway().ensureStarted().then(() => {
     const clean = loadConfig();
     delete clean.chatHistory;

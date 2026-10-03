@@ -8,5 +8,6 @@ contextBridge.exposeInMainWorld('dialogue', {
   saveSettings: settings => ipcRenderer.invoke('gateway-settings-save', settings),
   status: () => ipcRenderer.invoke('gateway-status'),
   manage: (action, payload) => ipcRenderer.invoke('gateway-manage', { action, payload }),
-  openLink: url => ipcRenderer.invoke('dialogue-open-link', url)
+  openLink: url => ipcRenderer.invoke('dialogue-open-link', url),
+  workspace: (action, payload) => ipcRenderer.invoke(`workspace-${action}`, payload),
 });

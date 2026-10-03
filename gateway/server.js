@@ -28,13 +28,13 @@ async function readJson(req) {
 }
 
 // Start the service on a kernel-selected loopback port; the bearer token stays in the main process.
-async function createGateway({ token, settings, dataDir, legacyHistory = [], workspaceRoot = path.join(__dirname, '..') }) {
+async function createGateway({ token, settings, dataDir, legacyHistory = [], workspaceRoot = path.join(__dirname, '..'), workspacePermissions = [] }) {
   let config = normalizeSettings(settings);
   const temporaryDir = !dataDir ? fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'baizi-gateway-test-')) : null;
   const storage = await Storage.open(dataDir || temporaryDir, legacyHistory);
   storage.setProfileProactiveEnabled(config.profileEnabled && config.profileProactiveQuestions);
   const memory = new MemoryService(storage, () => config);
-  const chat = new ChatService(storage, persona, memory, { workspaceRoot });
+  const chat = new ChatService(storage, persona, memory, { workspaceRoot, workspacePermissions, protectedPaths: [dataDir || temporaryDir] });
   let active = null;
   const server = http.createServer(async (req, res) => {
     const supplied = Buffer.from(req.headers.authorization || '');
@@ -52,6 +52,8 @@ async function createGateway({ token, settings, dataDir, legacyHistory = [], wor
       const body = req.method === 'POST' ? await readJson(req) : {};
       if (req.url === '/configure' && req.method === 'POST') {
         config = normalizeSettings(body);
+        workspacePermissions = config.workspacePermissions;
+        chat.toolOptions.workspacePermissions = workspacePermissions;
         storage.setProfileProactiveEnabled(config.profileEnabled && config.profileProactiveQuestions);
         if (!config.autoMemory) memory.pause(); else memory.kick();
         return respond({ ok: true });

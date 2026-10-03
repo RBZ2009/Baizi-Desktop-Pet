@@ -42,7 +42,8 @@ class ChatService {
         const schemaBytes = tools.length ? Buffer.byteLength(JSON.stringify(tools)) + 128 : 0;
         // Reserve room for tool definitions and results without crowding out the persona/current prompt.
         if (schemaBytes + 2048 + Buffer.byteLength(this.context.persona + prompt) > inputBudget) tools = [];
-        const capabilities = tools.length ? `本轮可用工具：${tools.map(tool => tool.function.name).join('、')}。未列出的工具不可用；不能声称未开启的联网、诊断或动作已执行。` : '本轮没有工具权限（关闭或上下文空间不足）。不要声称已联网查询、运行命令或发出动作请求。';
+        const workspaceInfo = tools.some(tool => tool.function.name === 'run_command') ? `\n默认工作区：${this.toolOptions.workspaceRoot}。已批准目录：${(this.toolOptions.workspacePermissions || []).map(item => item.path).join('、')}。工作区之外的目录必须先申请权限，等待用户在设置中批准，再由用户继续任务。` : '';
+        const capabilities = (tools.length ? `本轮可用工具：${tools.map(tool => tool.function.name).join('、')}。未列出的工具不可用；不能声称未开启的联网、诊断或动作已执行。` : '本轮没有工具权限（关闭或上下文空间不足）。不要声称已联网查询、运行命令或发出动作请求。') + workspaceInfo;
         const fixedBytes = tokenBound([{ role: 'system', content: this.context.persona + capabilities }, { role: 'user', content: prompt }]) + 256;
         const toolReserve = tools.length ? schemaBytes + Math.max(0, Math.min(4096, Math.floor(inputBudget * 0.2), inputBudget - fixedBytes - schemaBytes - 512)) : 0;
         const context = await this.context.build(session.id, prompt, settings, signal, toolReserve, capabilities);
@@ -98,8 +99,9 @@ class ChatService {
               send({ type: 'tool', name: call.function.name, status: 'complete', ...(call.function.name === 'set_pet_action' ? { result: output } : {}) });
             } catch (error) {
               if (signal.aborted) throw error;
-              output = { error: error.message };
-              send({ type: 'tool', name: call.function.name, status: 'error', error: error.message });
+              output = { error: error.message, ...(error.code === 'WORKSPACE_PERMISSION_REQUIRED' ? { permissionRequest: { path: error.path, reason: error.reason } } : {}) };
+              send({ type: 'tool', name: call.function.name, status: 'error', error: error.message,
+                ...(error.code === 'WORKSPACE_PERMISSION_REQUIRED' ? { permissionRequest: { path: error.path, reason: error.reason } } : {}) });
             }
             messages.push({ role: 'tool', tool_call_id: call.id, content: boundedToolResult(output, resultLimit) });
           }

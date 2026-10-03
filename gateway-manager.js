@@ -9,6 +9,7 @@ const { randomBytes } = require('node:crypto');
 const { normalizeSettings, publicSettings } = require('./gateway/settings');
 const { readSse } = require('./gateway/provider');
 const { HttpVoiceProvider } = require('./gateway/voice/http-provider');
+const { WorkspaceManager } = require('./workspace-manager');
 
 class GatewayManager {
   // Keep local files outside the install directory and preserve legacy history for migration.
@@ -22,6 +23,8 @@ class GatewayManager {
     this.port = null;
     this.token = randomBytes(32).toString('hex');
     this.settings = normalizeSettings();
+    this.workspaceManager = new WorkspaceManager(userData, { documents: app.getPath('documents') });
+    this.settings.workspaceRoot = this.workspaceManager.workspaceRoot;
     this.voiceControllers = new Map();
     this.settingsError = '';
     if (fs.existsSync(this.settingsPath)) {
@@ -35,18 +38,33 @@ class GatewayManager {
         delete saved.encryptedVoiceApiKey;
         delete saved.encryptedVoiceTranscriptionApiKey;
         delete saved.encryptedVoiceSynthesisApiKey;
-        this.settings = normalizeSettings(saved);
+        this.settings = normalizeSettings({ ...saved, workspaceRoot: this.workspaceManager.workspaceRoot });
       } catch { this.settingsError = '无法读取已有模型设置或解密凭据，请重新保存设置。'; }
     }
   }
 
   // Return availability indicators while keeping the credential in the main process.
   getSettings() { return { ...publicSettings(this.settings), settingsError: this.settingsError }; }
+  getWorkspace() { return this.workspaceManager.list(); }
+  requestWorkspaceAccess(target, reason) {
+    const result = this.workspaceManager.request(target, reason);
+    return result;
+  }
+  async approveWorkspaceAccess(target) { const result = this.workspaceManager.approve(target); await this.syncWorkspacePermissions(); return result; }
+  async revokeWorkspaceAccess(target) { const result = this.workspaceManager.revoke(target); await this.syncWorkspacePermissions(); return result; }
+  // Reject a pending request without changing the gateway's approved roots.
+  denyWorkspaceAccess(target) { return this.workspaceManager.deny(target); }
+  // Keep the utility process's approved roots aligned after a management decision.
+  async syncWorkspacePermissions() {
+    this.settings.workspacePermissions = this.workspaceManager.snapshot();
+    if (this.port || this.starting) return this.request('/configure', { ...this.settings, workspacePermissions: this.workspaceManager.snapshot() });
+    return null;
+  }
 
   // Preserve a blank key input; clearing it requires an explicit action.
   async saveSettings(input) {
     const { clearApiKey, clearVoiceApiKey, clearVoiceTranscriptionApiKey, clearVoiceSynthesisApiKey, hasApiKey, hasVoiceApiKey, settingsError, ...values } = input;
-    const next = normalizeSettings({ ...this.settings, ...values,
+    const next = normalizeSettings({ ...this.settings, ...values, workspaceRoot: this.workspaceManager.workspaceRoot, workspacePermissions: this.workspaceManager.snapshot(),
       apiKey: clearApiKey ? '' : (values.apiKey || this.settings.apiKey),
       voiceApiKey: clearVoiceApiKey ? '' : (values.voiceApiKey || this.settings.voiceApiKey),
       voiceTranscriptionApiKey: clearVoiceTranscriptionApiKey ? '' : (values.voiceTranscriptionApiKey || this.settings.voiceTranscriptionApiKey),
@@ -124,7 +142,7 @@ class GatewayManager {
         reject(new Error('本地对话服务已退出。'));
       });
       child.once('spawn', () => child.postMessage({ token: this.token, settings: this.settings, dataDir: this.dataDir, legacyHistory: this.legacyHistory,
-        workspaceRoot: app.isPackaged ? app.getPath('userData') : __dirname }));
+        workspaceRoot: this.workspaceManager.workspaceRoot, workspacePermissions: this.workspaceManager.snapshot() }));
     });
     try { await this.starting; } finally { this.starting = null; }
   }
@@ -150,7 +168,14 @@ class GatewayManager {
       body: JSON.stringify({ prompt }), signal
     });
     if (!response.ok) throw new Error((await response.json()).error);
-    for await (const data of readSse(response.body)) onEvent(JSON.parse(data));
+    for await (const data of readSse(response.body)) {
+      const event = JSON.parse(data);
+      if (event.permissionRequest) {
+        try { event.permissionRequest = { ...event.permissionRequest, ...this.requestWorkspaceAccess(event.permissionRequest.path, event.permissionRequest.reason) }; }
+        catch (error) { event.error = error.message; delete event.permissionRequest; }
+      }
+      onEvent(event);
+    }
   }
 
   // Open a sandboxed management UI with a dedicated preload bridge.

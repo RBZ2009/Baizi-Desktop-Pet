@@ -9,6 +9,7 @@ const { createGateway } = require('../gateway/server');
 const { chatCompletion, readSse } = require('../gateway/provider');
 const { normalizeSettings } = require('../gateway/settings');
 const { executeTool } = require('../gateway/tools/tool-registry');
+const { sandboxProfile } = require('../gateway/tools/shell-tool');
 
 // Run provider requests against a disposable local HTTP server.
 async function mockProvider(handler) {
@@ -75,7 +76,8 @@ test('gateway emits text completion and can abort an in-flight request', async (
     let input = '';
     req.on('data', chunk => input += chunk);
     req.on('end', () => {
-      if (input.includes('等待')) return;
+      // Match the actual user request; action guidance can legitimately contain the word “等待”.
+      if (JSON.parse(input).messages.filter(message => message.role === 'user').at(-1)?.content === '等待') return;
       res.end(JSON.stringify({ choices: [{ message: { content: '你好呀' } }] }));
     });
   });
@@ -136,8 +138,17 @@ test('gateway executes a model tool call and feeds the result back before replyi
   } finally { await gateway.close(); await provider.close(); }
 });
 
-test('command tool refuses commands outside its read-only allowlist', async () => {
-  await assert.rejects(executeTool('run_command', JSON.stringify({ command: 'rm -rf .' }), { workspaceRoot: process.cwd() }), /允许列表/);
+test('command tool requires explicit directory approval and produces a bounded sandbox', async () => {
+  await assert.rejects(executeTool('run_command', JSON.stringify({ command: 'cat notes.md' }), { workspaceRoot: process.cwd(), workspacePermissions: [] }), error => {
+    assert.equal(error.code, 'WORKSPACE_PERMISSION_REQUIRED');
+    assert.equal(error.path, process.cwd());
+    return true;
+  });
+  const profile = sandboxProfile(['/tmp/approved'], ['/tmp/private']);
+  assert.match(profile, /deny default/);
+  assert.match(profile, /subpath "\/tmp\/approved"/);
+  assert.match(profile, /deny file-read\* file-write\* \(subpath "\/tmp\/private"\)/);
+  assert.doesNotMatch(profile, /network-outbound/);
 });
 
 test('action tool normalizes a supported animation command', async () => {
@@ -145,8 +156,41 @@ test('action tool normalizes a supported animation command', async () => {
   await assert.rejects(executeTool('set_pet_action', JSON.stringify({ action: 'deleteFiles' })), /动作不在允许列表/);
   assert.equal((await executeTool('set_pet_action', '{"action":"nod"}')).durationMs, 1400);
   await assert.rejects(executeTool('set_pet_action', '{"action":"nod","durationMs":1.5}'), /参数无效/);
-  await assert.rejects(executeTool('run_command', '{"command":"npm test"}'), /允许列表/);
+  await assert.rejects(executeTool('run_command', '{"command":"npm test"}'), /授权/);
   await assert.rejects(executeTool('get_current_time', 'null'), /JSON 对象/);
+});
+
+test('gateway exposes dialogue gestures and forwards a model-selected comfort action', async () => {
+  let offeredActions = [];
+  const provider = await mockProvider((req, res) => {
+    let input = '';
+    req.on('data', chunk => input += chunk);
+    req.on('end', () => {
+      const body = JSON.parse(input);
+      if (!body.messages.some(message => message.role === 'tool')) {
+        offeredActions = body.tools.find(tool => tool.function.name === 'set_pet_action').function.parameters.properties.action.enum;
+        return res.end(JSON.stringify({ choices: [{ finish_reason: 'tool_calls', message: { role: 'assistant', content: null, tool_calls: [
+          { id: 'call_comfort', type: 'function', function: { name: 'set_pet_action', arguments: '{"action":"comfort"}' } }
+        ] } }] }));
+      }
+      res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: '嗯，我在这里。' } }] }));
+    });
+  });
+  const gateway = await createGateway({ token: 'test-token', settings: provider.settings });
+  try {
+    const response = await fetch(`http://127.0.0.1:${gateway.port}/chat`, { method: 'POST',
+      headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: '今天工作好累。' }) });
+    const events = [];
+    for await (const data of readSse(response.body)) events.push(JSON.parse(data));
+    for (const action of ['listen', 'explain', 'confused', 'idea', 'shy', 'comfort', 'cheer', 'stretch',
+      'proud', 'surprised', 'protest', 'peek', 'sleepy', 'clap']) {
+      assert.ok(offeredActions.includes(action), action);
+      assert.equal((await executeTool('set_pet_action', JSON.stringify({ action }))).action, action);
+    }
+    assert.deepEqual(events.find(event => event.name === 'set_pet_action' && event.status === 'complete')?.result,
+      { action: 'comfort', durationMs: 4000 });
+    assert.equal(events.at(-1).text, '嗯，我在这里。');
+  } finally { await gateway.close(); await provider.close(); }
 });
 
 test('gateway falls back to plain text when an older provider rejects tool fields', async () => {

@@ -24,6 +24,7 @@ const voiceInput = typeof VoiceInput === 'function' ? new VoiceInput({
 }) : null;
 
 window.desktopPet?.onVoiceStop?.(() => voiceInput?.stop());
+window.desktopPet?.onProactiveMessage?.(payload => { if (payload?.text) window.desktopPet.setSpeechText?.({ text: payload.text, closable: true, messageId: `proactive-${Date.now()}` }); });
 
 function resizeChatWindow() {
   const canvas = document.createElement('canvas');

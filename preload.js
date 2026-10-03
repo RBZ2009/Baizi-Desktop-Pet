@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('desktopPet', {
   },
   getSizeScaleOverrides: () => ipcRenderer.invoke('pet-get-size-scale-overrides'),
   cancelChat: () => ipcRenderer.send('pet-chat-cancel'),
+  onProactiveMessage: callback => { const handler = (_event, payload) => callback(payload); ipcRenderer.on('pet-proactive-message', handler); return () => ipcRenderer.removeListener('pet-proactive-message', handler); },
   submitVoiceText: text => ipcRenderer.send('pet-chat-submit-text', String(text || '').slice(0, 12000)),
   transcribeVoice: (audioBase64, mimeType) => ipcRenderer.invoke('voice-transcribe', { audioBase64, mimeType }),
   getVoiceSettings: () => ipcRenderer.invoke('voice-settings-get'),

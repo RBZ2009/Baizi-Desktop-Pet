@@ -18,11 +18,17 @@
 <label>时区<input id="timeZone" placeholder="Asia/Shanghai"></label>
 <label class="check"><input id="autoMemory" type="checkbox">自动提取值得长期记住的信息</label>
 <label class="check"><input id="toolsEnabled" type="checkbox">允许白子查询天气、搜索网页和控制动作</label>
-<label class="check"><input id="commandToolsEnabled" type="checkbox">允许只读命令诊断（在工具开关开启时生效）</label>
+<label class="check"><input id="commandToolsEnabled" type="checkbox">允许受控工作区命令（在工具开关开启时生效）</label>
 <label class="check"><input id="profileEnabled" type="checkbox">在对话中使用本地用户档案</label>
 <label class="check"><input id="profileProactiveQuestions" type="checkbox">允许白子在合适时主动完善用户档案</label>
 <label>档案主动询问冷却（小时）<input id="profileQuestionCooldownHours" type="number" min="1" max="8760" required></label>
-<p class="hint">天气使用 Open-Meteo，搜索使用 DuckDuckGo；查询内容会发送给对应服务。命令诊断仅允许固定命令，结果会发送给模型。命令默认关闭，不读取文件正文、不执行项目脚本。</p>
+<h2>工作区与主动陪伴</h2>
+<p id="workspace-root" class="muted"></p><p class="hint">默认工作区位于文稿目录。其他目录必须由你审批；审批后白子可在该目录中读写文件和运行命令，不能访问网络或桌宠凭据。</p>
+<div id="workspace-pending"></div><div id="workspace-approved"></div>
+<button id="refresh-workspace" type="button">刷新权限申请</button>
+<label class="check"><input id="proactiveEnabled" type="checkbox">允许白子偶尔主动提醒</label>
+<label>主动提醒间隔（分钟）<input id="proactiveIntervalMinutes" type="number" min="30" max="1440"></label>
+<p class="hint">天气使用 Open-Meteo，搜索使用 DuckDuckGo；查询内容会发送给对应服务。命令默认关闭，只能在已批准目录中运行受控命令，结果会发送给模型。</p>
 <label class="check"><input id="ttsEnabled" type="checkbox">使用 macOS 系统语音播报回复</label>
 <div class="grid"><label>系统声音<input id="ttsVoice" placeholder="Tingting"></label><label>语速（每分钟字数）<input id="ttsRate" type="number" min="80" max="400" required></label></div>
 <h2>麦克风与 API 配音</h2>
