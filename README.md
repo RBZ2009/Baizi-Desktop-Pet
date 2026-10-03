@@ -12,8 +12,8 @@
 
 1. 填写 API Base URL、模型名和 API Key，保存设置。
 2. 点击 **测试模型连接**。此操作会发起一次真实 API 请求，使用已保存的设置。
-3. 按 **Ctrl + Enter** 打开聊天输入框，输入消息后按 Enter 或点击发送。
-4. 再次打开输入框，点击 **停止** 可停止回复和播报；发送新消息也会打断旧请求。
+3. 点击角色头部或按 **Ctrl + Enter** 打开聊天输入框，输入消息后按 Enter 发送，Shift + Enter 换行。
+4. 再次点击头部关闭输入框。输入框中按 Escape 停止当前回复和播报并关闭输入框；发送新消息也会打断旧请求。
 
 默认提供阿里云兼容接口地址和 `qwen-plus` 模型名称作为填写起点；API Key 需要用户自行提供。其他供应商需支持 `/chat/completions` 的 `messages`、`max_tokens` 和文字响应，流式 SSE 与普通 JSON 均可。
 
@@ -62,7 +62,15 @@ xattr -d com.apple.quarantine *.command
 
 回复气泡是独立的置顶窗口，会根据角色窗口和当前显示器工作区自动计算位置；内容较长或角色靠近屏幕顶部时，会在角色下方显示并自动避开屏幕边界。气泡不会改变角色窗口的尺寸或拖动区域。
 
-人设位于 `gateway/prompts/baizi.md`，在原服务的可爱、贴心、自然、适度调皮风格上补充了冷静直接、行动派和桌面陪伴者的角色层次。网关当前提供时间、城市天气、公开网页搜索、只读本地诊断和受限桌宠动作五类工具。工具结果会经过网关验证和长度限制；命令工具只允许固定的只读命令，不执行任意 shell。动作请求通过主进程和 preload 桥接到渲染端，只能选择现有动作库中的名称。
+人设位于 `gateway/prompts/baizi.md`，结合寡言、行动派、重视伙伴和喜欢运动的原作基调，补充桌面陪伴者的生活方式。资料来源与原创扩展见 [`docs/PERSONA_SOURCES.md`](docs/PERSONA_SOURCES.md)。
+
+在 **对话与记忆 → 模型设置** 中可以开关工具。当前提供时间、城市天气（Open-Meteo）、公开网页搜索（DuckDuckGo）、只读本地诊断和受限桌宠动作五类工具。查询内容会发送给对应服务，结果选入上下文后发送给模型。模型须支持标准 `tools/tool_calls`；不支持时自动退回文字回复。
+
+工具回复与函数参数支持流式解析，一轮最多执行 6 次工具、1 次动作，再要求模型完成文字回答。参数、执行时间、网络返回大小和上下文占用均受限制；网页摘要不会被当作系统指令。搜索站点要求验证码或内容格式变化时会明确报错，不假报已搜索。
+
+命令工具默认关闭，开启后仅允许 `pwd`、`date`、`whoami`、`uname`、`ls`、`git status`、`git log --oneline -5`。源码运行时工作目录为项目根目录，打包运行时为应用数据目录。它不执行任意 shell、项目脚本或 `npm test`，也不读取文件正文；命令结果会发送给模型。
+
+模型可通过动作工具选择挥手、跳跃、跳舞、坐下和新增的点头、摇头、鞠躬、思考姿态。选择规则位于 `gateway/skills/pet-actions/SKILL.md`，由网关加载。动作在有限时长后恢复待机，用户拖动或暂停时用户交互优先。新增姿态由现有 VRM 骨骼生成，无需下载动作资源。
 
 ## 本地数据和凭据
 
@@ -98,6 +106,7 @@ main.js / preload.js / renderer.js  桌宠窗口、交互与受控 IPC
    chat-service.js                 对话串行执行、取消与状态保存
    tools/tool-registry.js          时间、天气、搜索、命令和动作工具注册
    actions/action-registry.js      模型可用的动作协议和参数校验
+   skills/pet-actions/SKILL.md     网关加载的动作选择 skill
    context-manager.js              预算、摘要和相关记忆召回
    memory-service.js               后台提取与有限重试
    storage.js                      SQLite 事务和原子落盘
@@ -107,6 +116,7 @@ main.js / preload.js / renderer.js  桌宠窗口、交互与受控 IPC
  archive/legacy-tts/              不参与运行的旧版 Python/Qwen TTS 示例
  archive/legacy-launch/           不参与运行的旧版 Windows 启动脚本
  docs/VOICE_ARCHITECTURE.md       实时语音接入边界和实施顺序
+ docs/PERSONA_SOURCES.md          角色资料来源和原创桌宠设定
 ```
 
 3D 模型放在 `assets/model.vrm`，缺失时回退到 `assets/pet.png`。页面实际引用的 `vendor/three/` 随源码和应用一起保留。

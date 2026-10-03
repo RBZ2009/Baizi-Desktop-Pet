@@ -2,7 +2,7 @@
  * Responsibility: Own gateway lifecycle, provider settings and encrypted credentials in Electron.
  * Implementation: 1. Start a utility process lazily. 2. Use authenticated loopback requests. 3. Atomically persist settings with safeStorage.
  */
-const { utilityProcess, safeStorage, BrowserWindow } = require('electron');
+const { app, utilityProcess, safeStorage, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomBytes } = require('node:crypto');
@@ -70,7 +70,8 @@ class GatewayManager {
         if (this.child === child) { this.port = null; this.child = null; }
         reject(new Error('本地对话服务已退出。'));
       });
-      child.once('spawn', () => child.postMessage({ token: this.token, settings: this.settings, dataDir: this.dataDir, legacyHistory: this.legacyHistory }));
+      child.once('spawn', () => child.postMessage({ token: this.token, settings: this.settings, dataDir: this.dataDir, legacyHistory: this.legacyHistory,
+        workspaceRoot: app.isPackaged ? app.getPath('userData') : __dirname }));
     });
     try { await this.starting; } finally { this.starting = null; }
   }

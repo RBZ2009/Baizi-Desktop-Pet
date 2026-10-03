@@ -14,7 +14,7 @@ async function loadSettings() {
   const settings = await api.getSettings();
   for (const key of fields) document.getElementById(key).value = settings[key];
   document.getElementById('timeoutSeconds').value = settings.requestTimeoutMs / 1000;
-  for (const key of ['autoMemory', 'ttsEnabled']) document.getElementById(key).checked = settings[key];
+  for (const key of ['autoMemory', 'toolsEnabled', 'commandToolsEnabled', 'ttsEnabled']) document.getElementById(key).checked = settings[key];
   document.getElementById('apiKey').placeholder = settings.hasApiKey ? '已保存 Key；留空保留' : '请输入 API Key';
   if (settings.settingsError) showNotice(settings.settingsError);
 }
@@ -24,7 +24,7 @@ document.getElementById('settings-form').addEventListener('submit', async event 
   event.preventDefault();
   try {
     const settings = Object.fromEntries(fields.map(key => [key, document.getElementById(key).value]));
-    for (const key of ['autoMemory', 'ttsEnabled', 'clearApiKey']) settings[key] = document.getElementById(key).checked;
+    for (const key of ['autoMemory', 'toolsEnabled', 'commandToolsEnabled', 'ttsEnabled', 'clearApiKey']) settings[key] = document.getElementById(key).checked;
     settings.apiKey = document.getElementById('apiKey').value;
     settings.requestTimeoutMs = Number(document.getElementById('timeoutSeconds').value) * 1000;
     await api.saveSettings(settings);

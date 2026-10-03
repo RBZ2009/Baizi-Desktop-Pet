@@ -6,7 +6,9 @@ const { chatCompletion } = require('./provider');
 
 // A UTF-8 byte bound is deliberately conservative across compatible-model tokenizers.
 function tokenBound(messages) {
-  return messages.reduce((total, message) => total + Buffer.byteLength(message.content, 'utf8') + 24, 0) + 32;
+  return messages.reduce((total, message) => total + Buffer.byteLength(message.content || '', 'utf8') +
+    (message.tool_calls ? Buffer.byteLength(JSON.stringify(message.tool_calls), 'utf8') : 0) +
+    (message.tool_call_id ? Buffer.byteLength(message.tool_call_id, 'utf8') : 0) + 24, 0) + 32;
 }
 
 // Rank Chinese bigrams and Latin terms without requiring an external embedding service.
@@ -39,8 +41,8 @@ class ContextManager {
   constructor(storage, persona) { this.storage = storage; this.persona = persona; }
 
   // Assemble context under the configured input budget, using summaries only for completed turns.
-  async build(sessionId, prompt, settings, signal) {
-    const budget = settings.contextWindow - settings.maxOutputTokens - 1024;
+  async build(sessionId, prompt, settings, signal, inputReserve = 0) {
+    const budget = settings.contextWindow - settings.maxOutputTokens - 1024 - inputReserve;
     const fixed = [{ role: 'system', content: this.persona + '\n当前时间：' + new Date().toLocaleString('zh-CN', { timeZone: settings.timeZone }) + `（${settings.timeZone}）` }];
     const current = { role: 'user', content: prompt };
     if (tokenBound([...fixed, current]) > budget) throw new Error('这条消息超过模型上下文预算，请缩短消息或调整上下文窗口。');

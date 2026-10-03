@@ -429,6 +429,8 @@ let t = 0;
 let react = null; // { type, startMs }
 let currentAction = 'idle'; // idle | wave | walk | sit | sillyDance | hipHop | praying | jump | dying
 let actionUntilMs = 0;
+let actionStartedMs = 0;
+let modelExpressionUntilMs = 0;
 
 let randomActionTimer = null;
 let isPaused = false;
@@ -1000,7 +1002,12 @@ function updateWalkFacing() {
 }
 
 function setAction(name, durationMs = 0) {
+  if (modelExpressionUntilMs) {
+    setExpression(VRMExpressionPresetName.Joy, 0);
+    modelExpressionUntilMs = 0;
+  }
   currentAction = name;
+  actionStartedMs = performance.now();
   actionUntilMs = durationMs > 0 ? performance.now() + durationMs : 0;
   syncDefaultAnimationPlayback();
   syncWalkAnimationPlayback();
@@ -1015,16 +1022,42 @@ function setAction(name, durationMs = 0) {
 
 // Apply only validated action commands delivered by the gateway tool bridge.
 function applyModelAction(command) {
-  const allowed = new Set(['idle', 'wave', 'walk', 'sit', 'sillyDance', 'hipHop', 'praying', 'jump']);
+  const allowed = new Set(['idle', 'wave', 'walk', 'sit', 'sillyDance', 'hipHop', 'praying', 'jump', 'nod', 'shakeHead', 'bow', 'think']);
   const action = String(command?.action || '');
-  if (!allowed.has(action) || isPaused) return;
+  if (!allowed.has(action) || isPaused || isDragging) return;
+  const available = { sillyDance: hasExternalSillyDanceAnimation, hipHop: hasExternalHipHopAnimation,
+    praying: hasExternalPrayingAnimation, jump: hasExternalJumpAnimation };
   const duration = Math.max(0, Math.min(10000, Number(command?.durationMs) || 0));
-  const effectiveDuration = action === 'wave' && duration === 0 ? 1800 : duration;
-  if (['wave', 'sillyDance', 'hipHop', 'jump'].includes(action)) setExpression(VRMExpressionPresetName.Joy, 1);
-  setAction(action, effectiveDuration);
+  const effectiveDuration = action === 'idle' ? 0 : (duration || 1800);
+  // If a bundled clip is unavailable, use a small procedural greeting instead.
+  const selectedAction = Object.hasOwn(available, action) && !available[action] ? 'wave' : action;
+  setAction(selectedAction, effectiveDuration);
+  if (['wave', 'sillyDance', 'hipHop', 'jump'].includes(selectedAction)) {
+    setExpression(VRMExpressionPresetName.Joy, 0.65);
+    modelExpressionUntilMs = performance.now() + effectiveDuration;
+  }
 }
 
 window.desktopPet?.onPetAction?.(applyModelAction);
+
+// Add gentle procedural gestures without requiring new licensed animation assets.
+function applyConversationGesture() {
+  const elapsed = (performance.now() - actionStartedMs) / 1000;
+  const remaining = Math.max(0, (actionUntilMs - performance.now()) / 1000);
+  const blend = Math.min(1, elapsed / 0.3, remaining / 0.3);
+  if (bones.head && currentAction === 'nod') bones.head.rotation.x += Math.sin(elapsed * 7) * 0.16 * blend;
+  if (bones.head && currentAction === 'shakeHead') bones.head.rotation.y += Math.sin(elapsed * 7) * 0.22 * blend;
+  if (currentAction === 'bow') {
+    const spine = bones.spine || bones.chest;
+    if (spine) spine.rotation.x += 0.22 * blend;
+    if (bones.head) bones.head.rotation.x += 0.16 * blend;
+  }
+  if (currentAction === 'think') {
+    if (bones.head) bones.head.rotation.z += 0.14 * blend;
+    if (bones.rightUpperArm) bones.rightUpperArm.rotation.x -= 0.55 * blend;
+    if (bones.rightLowerArm) bones.rightLowerArm.rotation.x -= 0.6 * blend;
+  }
+}
 
 // 鼠标全屏跟随：即使鼠标不在桌宠窗口内，也会持续看向鼠标
 let look = { x: 0, y: 0 };
@@ -1294,11 +1327,15 @@ function animate() {
     if (actionUntilMs && performance.now() > actionUntilMs) {
       setAction('idle');
     }
+    if (modelExpressionUntilMs && performance.now() > modelExpressionUntilMs) {
+      setExpression(VRMExpressionPresetName.Joy, 0);
+      modelExpressionUntilMs = 0;
+    }
 
     // 动作叠加
     if (currentAction === 'wave') {
-      const k01 = Math.min((actionUntilMs - performance.now() + 900) / 900, 1);
-      applyWave(t, THREE.MathUtils.clamp(1 - k01, 0, 1));
+      const k01 = Math.min((performance.now() - actionStartedMs) / 350, 1);
+      applyWave(t, THREE.MathUtils.clamp(k01, 0, 1));
     } else if (currentAction === 'walk') {
       if (!hasExternalWalkAnimation) {
         applyWalk(t);
@@ -1360,6 +1397,8 @@ function animate() {
       bones.head.rotation.x = headLookCurrent.x;
       bones.head.rotation.y = headLookCurrent.y;
     }
+
+    applyConversationGesture();
 
     // 外部 walk.vrma 往往包含根位移（root motion），会导致循环回跳和角色出框。
     // 这里锁定 hips 的 X/Z，只保留 Y 起伏与肢体动画。

@@ -33,6 +33,24 @@ test('provider decodes split UTF-8 SSE and ignores reasoning content', async () 
   } finally { await provider.close(); }
 });
 
+test('provider keeps fragmented tool arguments separate from streamed reply text', async () => {
+  const provider = await mockProvider((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    const frames = [
+      { choices: [{ delta: { content: '嗯，', tool_calls: [{ index: 0, id: 'call_nod', type: 'function', function: { name: 'set_pet_action', arguments: '{"action":' } }] } }] },
+      { choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"nod"}' } }] }, finish_reason: 'tool_calls' }] }
+    ];
+    res.end(frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join('') + 'data: [DONE]\n\n');
+  });
+  try {
+    let visible = '';
+    const result = await chatCompletion(provider.settings, [], { tools: [{ type: 'function', function: { name: 'set_pet_action' } }], onDelta: text => visible += text });
+    assert.equal(visible, '嗯，');
+    assert.equal(result.toolCalls[0].function.arguments, '{"action":"nod"}');
+    assert.equal(result.toolCalls[0].id, 'call_nod');
+  } finally { await provider.close(); }
+});
+
 test('provider accepts non-stream JSON and reports deadline errors', async () => {
   const provider = await mockProvider((_req, res) => res.end(JSON.stringify({ choices: [{ message: { content: 'JSON 回复' } }] })));
   try { assert.equal((await chatCompletion(provider.settings, [])).text, 'JSON 回复'); }
@@ -125,4 +143,28 @@ test('command tool refuses commands outside its read-only allowlist', async () =
 test('action tool normalizes a supported animation command', async () => {
   assert.deepEqual(await executeTool('set_pet_action', JSON.stringify({ action: 'wave', durationMs: 1800 })), { action: 'wave', durationMs: 1800 });
   await assert.rejects(executeTool('set_pet_action', JSON.stringify({ action: 'deleteFiles' })), /动作不在允许列表/);
+  assert.equal((await executeTool('set_pet_action', '{"action":"nod"}')).durationMs, 1400);
+  await assert.rejects(executeTool('set_pet_action', '{"action":"nod","durationMs":1.5}'), /参数无效/);
+  await assert.rejects(executeTool('run_command', '{"command":"npm test"}'), /允许列表/);
+  await assert.rejects(executeTool('get_current_time', 'null'), /JSON 对象/);
+});
+
+test('gateway falls back to plain text when an older provider rejects tool fields', async () => {
+  const provider = await mockProvider((req, res) => {
+    let input = '';
+    req.on('data', chunk => input += chunk);
+    req.on('end', () => {
+      const body = JSON.parse(input);
+      if (body.tools) return res.writeHead(400).end('{}');
+      res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: '兼容文字回复。' } }] }));
+    });
+  });
+  const gateway = await createGateway({ token: 'test-token', settings: provider.settings });
+  try {
+    const response = await fetch(`http://127.0.0.1:${gateway.port}/chat`, { method: 'POST', headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: '你好' }) });
+    const events = [];
+    for await (const data of readSse(response.body)) events.push(JSON.parse(data));
+    assert.equal(events.at(-1).text, '兼容文字回复。');
+    assert.equal(events.find(event => event.status === 'unavailable')?.name, 'tools');
+  } finally { await gateway.close(); await provider.close(); }
 });

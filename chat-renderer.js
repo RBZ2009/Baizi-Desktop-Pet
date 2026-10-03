@@ -1,3 +1,7 @@
+/**
+ * Responsibility: Own the independent glass chat composer and display dialogue progress.
+ * Implementation: 1. Resize from input content. 2. Ignore stale request events. 3. Relay replies to the speech overlay.
+ */
 const panel = document.getElementById('chat-panel');
 const input = document.getElementById('chat-input');
 let petWidth = 132;
@@ -49,6 +53,7 @@ async function submitPrompt() {
   window.desktopPet?.cancelChat?.();
   activeRequestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   latestText = '';
+  if (bubbleTimer) { clearTimeout(bubbleTimer); bubbleTimer = null; }
   input.value = '';
   resizeChatWindow();
   setSpeech('思考中…', false);
@@ -74,6 +79,9 @@ window.desktopPet?.onChatStream?.(payload => {
   if (payload.type === 'chunk') {
     latestText += payload.text || '';
     setSpeech(latestText || '...', false);
+  } else if (payload.type === 'tool' && payload.status === 'running') {
+    const labels = { get_weather: '查询天气中…', search_web: '搜索网页中…', get_current_time: '查看时间中…', run_command: '本地诊断中…', set_pet_action: '回应中…' };
+    setSpeech(latestText || labels[payload.name] || '处理工具请求中…', false);
   } else if (['done', 'error', 'cancelled'].includes(payload.type)) {
     const result = payload.type === 'done' ? (payload.text || latestText) :
       payload.type === 'cancelled' ? (latestText || '已停止回复。') :

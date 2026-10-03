@@ -50,8 +50,8 @@ async function chatCompletion(settings, messages, { signal, onDelta, model, json
   let expired = false;
   const timer = setTimeout(() => { expired = true; controller.abort(); }, settings.requestTimeoutMs);
   try {
-    // Tool responses are kept non-streaming so fragmented function arguments cannot leak into user text.
-    const stream = !!onDelta && tools.length === 0;
+    // Stream visible text while assembling function arguments separately from text deltas.
+    const stream = !!onDelta;
     const response = await fetch(`${settings.baseUrl}/chat/completions`, {
       method: 'POST', signal: controller.signal,
       headers: { Authorization: `Bearer ${settings.apiKey}`, 'Content-Type': 'application/json' },
@@ -60,12 +60,15 @@ async function chatCompletion(settings, messages, { signal, onDelta, model, json
     });
     if (!response.ok) {
       await response.body?.cancel();
-      throw new Error(`模型 API 返回 HTTP ${response.status}，请检查地址、模型、额度及凭据。`);
+      const error = new Error(`模型 API 返回 HTTP ${response.status}，请检查地址、模型、额度及凭据。`);
+      error.status = response.status;
+      throw error;
     }
     let text = '';
     let usage = null;
     let finishReason = null;
     let toolCalls = [];
+    const streamedCalls = new Map();
     let streamCompleted = false;
     if ((response.headers.get('content-type') || '').includes('text/event-stream')) {
       if (!response.body) throw new Error('模型没有返回响应流。');
@@ -78,11 +81,22 @@ async function chatCompletion(settings, messages, { signal, onDelta, model, json
         finishReason = event.choices?.[0]?.finish_reason || finishReason;
         if (finishReason) streamCompleted = true;
         const delta = textContent(event.choices?.[0]?.delta?.content);
+        for (const part of event.choices?.[0]?.delta?.tool_calls || []) {
+          const index = Number(part.index);
+          if (!Number.isInteger(index) || index < 0 || index >= 8) throw new Error('模型返回的工具调用数量超过上限。');
+          const call = streamedCalls.get(index) || { id: '', type: 'function', function: { name: '', arguments: '' } };
+          call.id += part.id || '';
+          call.function.name += part.function?.name || '';
+          call.function.arguments += part.function?.arguments || '';
+          if (call.id.length > 200 || call.function.name.length > 100 || call.function.arguments.length > 4096) throw new Error('模型工具参数超过长度限制。');
+          streamedCalls.set(index, call);
+        }
         text += delta;
         if (text.length > 200000) throw new Error('模型回复超过长度限制。');
         if (delta) onDelta?.(delta);
       }
       if (!streamCompleted) throw new Error('模型响应流意外结束，未保存为完整回复。');
+      toolCalls = [...streamedCalls.entries()].sort(([a], [b]) => a - b).map(([, call]) => call);
     } else {
       const event = await response.json();
       if (event.error) throw new Error('模型返回了错误事件。');
@@ -97,6 +111,10 @@ async function chatCompletion(settings, messages, { signal, onDelta, model, json
       usage = event.usage;
       if (text) onDelta?.(text);
     }
+    if (toolCalls.length > 8 || toolCalls.some(call => !call.id || !call.function.name || call.id.length > 200 || call.function.name.length > 100 || call.function.arguments.length > 4096)) {
+      throw new Error('模型返回了无效或过长的工具请求。');
+    }
+    if (new Set(toolCalls.map(call => call.id)).size !== toolCalls.length) throw new Error('模型返回了重复的工具请求编号。');
     if (text.length > 200000) throw new Error('模型回复超过长度限制。');
     if (!text.trim() && !toolCalls.length) throw new Error('模型未返回可读回复。');
     return { text, usage, finishReason, toolCalls };

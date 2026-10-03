@@ -17,6 +17,9 @@
 <label>记忆提取模型<input id="memoryModel" placeholder="留空使用对话模型"></label>
 <label>时区<input id="timeZone" placeholder="Asia/Shanghai"></label>
 <label class="check"><input id="autoMemory" type="checkbox">自动提取值得长期记住的信息</label>
+<label class="check"><input id="toolsEnabled" type="checkbox">允许白子查询天气、搜索网页和控制动作</label>
+<label class="check"><input id="commandToolsEnabled" type="checkbox">允许只读命令诊断（在工具开关开启时生效）</label>
+<p class="hint">天气使用 Open-Meteo，搜索使用 DuckDuckGo；查询内容会发送给对应服务。命令诊断仅允许固定命令，结果会发送给模型。命令默认关闭，不读取文件正文、不执行项目脚本。</p>
 <label class="check"><input id="ttsEnabled" type="checkbox">使用 macOS 系统语音播报回复</label>
 <div class="grid"><label>系统声音<input id="ttsVoice" placeholder="Tingting"></label><label>语速（每分钟字数）<input id="ttsRate" type="number" min="80" max="400" required></label></div>
 <p class="hint">API Key 使用系统安全存储加密。选入上下文的对话和记忆会发送给模型供应商。</p>

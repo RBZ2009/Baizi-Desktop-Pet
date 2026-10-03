@@ -11,7 +11,8 @@ const { chatCompletion } = require('./provider');
 const { Storage } = require('./storage');
 const { MemoryService } = require('./memory-service');
 const { ChatService } = require('./chat-service');
-const persona = fs.readFileSync(path.join(__dirname, 'prompts/baizi.md'), 'utf8');
+const persona = fs.readFileSync(path.join(__dirname, 'prompts/baizi.md'), 'utf8') + '\n\n' +
+  fs.readFileSync(path.join(__dirname, 'skills/pet-actions/SKILL.md'), 'utf8');
 
 // Limit request size before parsing client data.
 async function readJson(req) {
@@ -26,12 +27,12 @@ async function readJson(req) {
 }
 
 // Start the service on a kernel-selected loopback port; the bearer token stays in the main process.
-async function createGateway({ token, settings, dataDir, legacyHistory = [] }) {
+async function createGateway({ token, settings, dataDir, legacyHistory = [], workspaceRoot = path.join(__dirname, '..') }) {
   let config = normalizeSettings(settings);
   const temporaryDir = !dataDir ? fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'baizi-gateway-test-')) : null;
   const storage = await Storage.open(dataDir || temporaryDir, legacyHistory);
   const memory = new MemoryService(storage, () => config);
-  const chat = new ChatService(storage, persona, memory, { workspaceRoot: process.env.BAIZI_TOOL_ROOT || process.cwd() });
+  const chat = new ChatService(storage, persona, memory, { workspaceRoot });
   let active = null;
   const server = http.createServer(async (req, res) => {
     const supplied = Buffer.from(req.headers.authorization || '');
