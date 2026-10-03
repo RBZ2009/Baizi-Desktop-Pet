@@ -31,12 +31,6 @@
         cursor: grab;
       }
 
-      #pet-shell.chat-open #pet-container {
-        width: var(--pet-frame-width, 100%);
-        left: 0;
-        transform: translateY(-50%);
-      }
-
       #pet-container.dragging {
         cursor: grabbing;
       }
@@ -148,27 +142,6 @@
         height: 100%;
       }
 
-      #dialog-container {
-        position: absolute;
-        left: 50%;
-        bottom: 4px;
-        transform: translateX(-50%);
-        width: min(300px, calc(100% - 8px));
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        pointer-events: none;
-        z-index: 20;
-      }
-
-      #pet-shell.chat-open #dialog-container {
-        left: calc(var(--pet-frame-width, 132px) + 8px);
-        top: 50%;
-        bottom: auto;
-        transform: translateY(-50%);
-        width: min(292px, calc(100% - var(--pet-frame-width, 132px) - 16px));
-      }
-
       /* 回复气泡：独立于角色容器，锚点在角色右上侧并向右上扩展 */
       #speech-bubble {
         position: fixed;
@@ -216,57 +189,6 @@
         visibility: visible;
       }
 
-      #chat-panel {
-        width: 100%;
-        box-sizing: border-box;
-        display: none;
-        flex-direction: column;
-        justify-content: center;
-        gap: 10px;
-        background: rgba(10, 12, 16, 0.72);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 10px;
-        padding: 12px;
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        pointer-events: auto;
-      }
-
-      #chat-panel.show {
-        display: flex;
-      }
-
-      #chat-input {
-        flex: 1;
-        min-width: 0;
-        border: none;
-        border-radius: 8px;
-        outline: none;
-        height: 40px;
-        padding: 8px 10px;
-        font-size: 14px;
-        color: #111827;
-        background: rgba(255, 255, 255, 0.96);
-      }
-
-      #chat-actions {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-      }
-
-      #chat-send, #chat-stop {
-        border: none;
-        border-radius: 6px;
-        min-height: 40px;
-        padding: 8px 10px;
-        font-size: 12px;
-        cursor: pointer;
-        background: #4f46e5;
-        color: #ffffff;
-      }
-
-      #chat-stop { background: #3d4655; }
     </style>
     <script type="importmap">
       {
@@ -286,15 +208,6 @@
         <div id="pet-fallback"></div>
         <div id="speech-bubble"></div>
         <div id="debug"></div>
-      </div>
-      <div id="dialog-container">
-        <div id="chat-panel">
-          <input id="chat-input" type="text" maxlength="12000" placeholder="和我说点什么…" />
-          <div id="chat-actions">
-            <button id="chat-send" type="button">发送</button>
-            <button id="chat-stop" type="button">停止</button>
-          </div>
-        </div>
       </div>
     </div>
 

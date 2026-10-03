@@ -20,9 +20,6 @@ const canvas = document.getElementById('pet-canvas');
 const fallback = document.getElementById('pet-fallback');
 const debugEl = document.getElementById('debug');
 const speechBubbleEl = document.getElementById('speech-bubble');
-const chatPanelEl = document.getElementById('chat-panel');
-const chatInputEl = document.getElementById('chat-input');
-const chatSendEl = document.getElementById('chat-send');
 let showPetBounds = false;
 
 function rand(min, max) {
@@ -392,16 +389,6 @@ if (window.desktopPet?.getSizeScaleOverrides) {
       fitVRMToWindow();
       updateDebug();
     }
-  }).catch(() => {});
-}
-
-if (window.desktopPet?.getDialogueSettings) {
-  window.desktopPet.getDialogueSettings().then((settings) => {
-    dialogueSettings = {
-      bubbleAutoClose: (settings?.bubbleAutoClose ?? true) !== false,
-      bubblePerCharMs: Math.max(10, Number(settings?.bubblePerCharMs) || 180),
-      charsPerLine: Math.max(5, Number(settings?.charsPerLine) || 15)
-    };
   }).catch(() => {});
 }
 
@@ -1238,121 +1225,12 @@ function setBehaviorStyle(styleName) {
   updateDebug();
 }
 
-function showSpeech(text, durationMs = 6000) {
-  const content = formatSpeechText(text);
-  // 始终允许长按关闭，自动关闭与手动关闭可并存
-  const closable = true;
-  const charsPerLine = Math.max(5, Number(dialogueSettings.charsPerLine) || 15);
-  if (window.desktopPet?.setSpeechText) {
-    window.desktopPet.setSpeechText({ text: content, closable, charsPerLine });
-  }
-
-  if (speechHideTimer) {
-    clearTimeout(speechHideTimer);
-    speechHideTimer = null;
-  }
-
-  if (!dialogueSettings.bubbleAutoClose) {
-    return;
-  }
-
-  const autoMs = Math.max(1200, (content.length || 0) * Math.max(10, Number(dialogueSettings.bubblePerCharMs) || 180));
-  const finalMs = Math.max(durationMs, autoMs);
-
-  speechHideTimer = window.setTimeout(() => {
-    if (window.desktopPet?.hideSpeech) window.desktopPet.hideSpeech();
-    speechHideTimer = null;
-  }, finalMs);
-}
-
 function setChatPanelVisible(visible) {
   chatPanelVisible = !!visible;
-  if (!chatPanelEl) return;
-  chatPanelEl.classList.toggle('show', chatPanelVisible);
-  petShell?.classList.toggle('chat-open', chatPanelVisible);
-
-  const layoutRequest = window.desktopPet?.setChatPanelVisible?.(chatPanelVisible);
-  layoutRequest?.then(layout => {
-    if (!layout?.ok) return;
-    petShell?.style.setProperty('--pet-frame-width', `${layout.petWidth}px`);
-    window.requestAnimationFrame(resize);
-  }).catch(() => {});
-
-  window.requestAnimationFrame(() => {
-    resize();
-  });
-
-  if (chatPanelVisible && chatInputEl) {
-    window.setTimeout(() => chatInputEl.focus(), 0);
-  } else if (document.activeElement === chatInputEl) {
-    chatInputEl.blur();
-  }
+  return window.desktopPet?.setChatPanelVisible?.(chatPanelVisible);
 }
 
-window.desktopPet?.onChatPanelLayout?.(layout => {
-  if (!Number.isFinite(layout?.petWidth)) return;
-  petShell?.style.setProperty('--pet-frame-width', `${layout.petWidth}px`);
-});
-
-function formatSpeechText(raw) {
-  if (!raw) return '';
-  // 只保留原始换行，不再按固定字符数硬切行，避免出现“追\n剧”这种生硬断字。
-  return raw.replace(/\s+\n/g, '\n').replace(/\n\s+/g, '\n');
-}
-
-function renderStreamingSpeech(text) {
-  const content = formatSpeechText(text || '...');
-  const charsPerLine = Math.max(5, Number(dialogueSettings.charsPerLine) || 15);
-  if (window.desktopPet?.setSpeechText) {
-    window.desktopPet.setSpeechText({ text: content, closable: false, charsPerLine });
-  }
-}
-
-let chatUnsubscribe = null;
-let lastChatRequestId = null;
-let lastChatText = '';
-// Surface playback errors only for the current reply, without discarding its text.
-window.desktopPet?.onSpeechStatus?.(status => {
-  if (status.requestId === lastChatRequestId && status.type === 'error') {
-    showSpeech(`${lastChatText || '语音提示'}\n\n${status.error}`, 12000);
-  }
-});
-// Submit to the gateway, detach stale listeners and finalize text independently of speech.
-async function submitChatPrompt() {
-  if (!chatInputEl || !window.desktopPet?.chatQueryStream) return;
-  const text = chatInputEl.value.trim();
-  if (!text) return;
-  chatUnsubscribe?.();
-  chatUnsubscribe = null;
-  window.desktopPet.cancelChat?.();
-  chatInputEl.value = '';
-  setChatPanelVisible(false);
-  if (speechHideTimer) { clearTimeout(speechHideTimer); speechHideTimer = null; }
-  const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  activeChatRequestId = requestId;
-  lastChatRequestId = requestId;
-  lastChatText = '';
-  let latestText = '';
-  renderStreamingSpeech('思考中…');
-  chatUnsubscribe = window.desktopPet.onChatStream(payload => {
-    if (!payload || payload.requestId !== activeChatRequestId) return;
-    if (payload.type === 'chunk') {
-      latestText += payload.text || '';
-      lastChatText = latestText;
-      renderStreamingSpeech(latestText);
-    } else if (['done', 'error', 'cancelled'].includes(payload.type)) {
-      const text = payload.type === 'done' ? (payload.text || latestText) :
-        (payload.type === 'cancelled' ? (latestText || '已停止回复。') : `${payload.error || '对话失败。'}${latestText ? '\n\n' + latestText : ''}`);
-      lastChatText = text;
-      const note = payload.truncated ? '\n\n（回复达到输出上限，可让白子继续。）' : '';
-      showSpeech((text || '没有收到可读回复。') + note, 12000);
-      activeChatRequestId = null;
-      chatUnsubscribe?.();
-      chatUnsubscribe = null;
-    }
-  });
-  window.desktopPet.chatQueryStream(requestId, text);
-}
+window.desktopPet?.onChatPanelVisibility?.(visible => { chatPanelVisible = !!visible; });
 
 function updateDebug() {
   if (!debugEl) return;
@@ -1500,15 +1378,8 @@ let longPressConsumed = false;
 let clickBurstCount = 0;
 let clickBurstTimer = null;
 let danceToggle = 0;
-let speechHideTimer = null;
 let chatPanelVisible = false;
-let activeChatRequestId = null;
 let currentSpeechAudio = null;
-let dialogueSettings = {
-  bubbleAutoClose: true,
-  bubblePerCharMs: 180,
-  charsPerLine: 15
-};
 
 function applyPetBoundsDebug(show) {
   showPetBounds = !!show;
@@ -1734,25 +1605,4 @@ window.addEventListener('keydown', (e) => {
     }
   }
 
-  if (chatPanelVisible && e.key === 'Escape') {
-    setChatPanelVisible(false);
-  }
 });
-
-// Let the user stop generation and speech without submitting another message.
-document.getElementById('chat-stop')?.addEventListener('click', () => window.desktopPet?.cancelChat?.());
-
-if (chatSendEl) {
-  chatSendEl.addEventListener('click', () => {
-    submitChatPrompt();
-  });
-}
-
-if (chatInputEl) {
-  chatInputEl.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      submitChatPrompt();
-    }
-  });
-}

@@ -8,26 +8,30 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { EventEmitter } = require('node:events');
 
-test('new replies detach old listeners and text completion does not wait for audio', async () => {
-  const source = fs.readFileSync(require.resolve('../renderer.js'), 'utf8');
-  const start = source.indexOf('let chatUnsubscribe = null;');
-  const end = source.indexOf('function updateDebug()', start);
-  const subscriptions = []; const shown = [];
-  const context = { window: { desktopPet: { cancelChat() {}, chatQueryStream() {},
-    onChatStream(callback) { const item = { callback, active: true }; subscriptions.push(item); return () => item.active = false; } } },
-    document: {}, chatInputEl: { value: '第一条' }, speechHideTimer: null, activeChatRequestId: null,
-    setChatPanelVisible() {}, renderStreamingSpeech: text => shown.push(text), showSpeech: text => shown.push(text),
-    Date, Math, clearTimeout, console };
-  vm.runInNewContext(source.slice(start, end), context);
-  await context.submitChatPrompt(); const first = context.activeChatRequestId;
-  context.chatInputEl.value = '第二条'; await context.submitChatPrompt(); const second = context.activeChatRequestId;
-  assert.equal(subscriptions[0].active, false);
-  subscriptions[0].callback({ requestId: first, type: 'chunk', text: '过期回复' });
+test('chat overlay ignores stale replies and completes text independently of speech', () => {
+  const source = fs.readFileSync(require.resolve('../chat-renderer.js'), 'utf8');
+  const listeners = {}; const shown = []; const streams = []; const keyHandlers = [];
+  const input = { value: '', style: {}, addEventListener(type, callback) { if (type === 'keydown') keyHandlers.push(callback); } };
+  const panel = { style: { setProperty() {} }, classList: { toggle() {} }, getBoundingClientRect: () => ({ height: 42 }) };
+  const context = {
+    document: { getElementById: id => id === 'chat-input' ? input : panel, createElement: () => ({ getContext: () => ({ font: '', measureText: text => ({ width: text.length * 6 }) }) }), body: { appendChild() {} } },
+    window: { desktopPet: {
+      cancelChat() {}, chatQueryStream: (id, text) => streams.push({ id, text }),
+      onChatStream(callback) { listeners.stream = callback; }, onSpeechStatus(callback) { listeners.speech = callback; },
+      setSpeechText: payload => shown.push(payload.text), hideSpeech() {}, setChatWindowSize() {},
+      getDialogueSettings: () => Promise.resolve({}), onChatWindowAnchor() {}, onChatPanelVisibility() {}
+    }, addEventListener() {} },
+    getComputedStyle: () => ({ font: '12px sans-serif' }), setTimeout, clearTimeout, Date, Math, console
+  };
+  vm.runInNewContext(source, context);
+  input.value = '第一条'; keyHandlers[0]({ key: 'Enter', shiftKey: false, isComposing: false, preventDefault() {} });
+  const first = streams[0].id;
+  input.value = '第二条'; keyHandlers[0]({ key: 'Enter', shiftKey: false, isComposing: false, preventDefault() {} });
+  const second = streams[1].id;
+  listeners.stream({ requestId: first, type: 'chunk', text: '过期回复' });
   assert.ok(!shown.includes('过期回复'));
-  subscriptions[1].callback({ requestId: second, type: 'chunk', text: '新回复' });
-  subscriptions[1].callback({ requestId: second, type: 'done', text: '新回复' });
-  assert.equal(context.activeChatRequestId, null);
-  assert.equal(subscriptions[1].active, false);
+  listeners.stream({ requestId: second, type: 'chunk', text: '新回复' });
+  listeners.stream({ requestId: second, type: 'done', text: '新回复' });
   assert.equal(shown.at(-1), '新回复');
 });
 

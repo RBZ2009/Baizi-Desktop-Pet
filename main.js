@@ -11,10 +11,11 @@ const speechService = new SpeechService();
 
 let mainWindow;
 let speechWindow = null;
+let chatWindow = null;
 let tray = null;
 let isPaused = false;
 let currentSizeMode = 'medium';
-let chatPanelExpanded = false;
+let chatPanelVisible = false;
 
 const sizePresets = {
   small: { width: 132, height: 172 },
@@ -117,6 +118,47 @@ function syncSpeechWindowPosition() {
   speechWindow.setPosition(Math.round(nx), Math.max(0, Math.round(ny)));
 }
 
+function syncChatWindowPosition() {
+  if (!mainWindow || mainWindow.isDestroyed() || !chatWindow || chatWindow.isDestroyed() || !chatWindow.isVisible()) return;
+  const [x, y] = mainWindow.getPosition();
+  const preset = getSizePreset(currentSizeMode);
+  const [chatWidth] = chatWindow.getSize();
+  const chatX = x + Math.round((preset.width - chatWidth) / 2);
+  const chatY = y + Math.round(preset.height * 0.61);
+  const area = screen.getDisplayMatching({ x: chatX, y: chatY, width: chatWidth, height: 40 })?.workArea || screen.getPrimaryDisplay().workArea;
+  chatWindow.setPosition(
+    Math.min(Math.max(area.x, chatX), Math.max(area.x, area.x + area.width - chatWidth)),
+    Math.min(Math.max(area.y, chatY), Math.max(area.y, area.y + area.height - 40))
+  );
+}
+
+function createChatWindow() {
+  if (chatWindow && !chatWindow.isDestroyed()) return chatWindow;
+  chatWindow = new BrowserWindow({
+    width: 176,
+    height: 48,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    show: false,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, preload: __dirname + '/preload.js' }
+  });
+  chatWindow.setAlwaysOnTop(true, 'screen-saver');
+  chatWindow.loadFile(path.join(__dirname, 'chat.html'));
+  chatWindow.setMenuBarVisibility(false);
+  chatWindow.webContents.on('did-finish-load', () => {
+    const preset = getSizePreset(currentSizeMode);
+    chatWindow?.webContents.send('pet-chat-window-anchor', { petWidth: preset.width, petHeight: preset.height });
+    chatWindow?.webContents.send('pet-chat-panel-visibility', chatPanelVisible);
+    syncChatWindowPosition();
+  });
+  chatWindow.on('closed', () => { chatWindow = null; });
+  return chatWindow;
+}
+
 function notifyPauseChanged() {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send('pet-pause-changed', isPaused);
@@ -139,6 +181,14 @@ function setPaused(nextPaused) {
     } else {
       speechWindow.showInactive();
       syncSpeechWindowPosition();
+    }
+  }
+
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    if (isPaused) chatWindow.hide();
+    else if (chatPanelVisible) {
+      syncChatWindowPosition();
+      chatWindow.showInactive();
     }
   }
 
@@ -216,15 +266,13 @@ function applySizeMode(nextMode, { persist = true, restart = false } = {}) {
   }
 
   const [x, y] = mainWindow.getPosition();
-  const pos = clampWindowPosition(x, y, mainWindow, {
-    width: preset.width + (chatPanelExpanded ? 300 : 0),
-    height: preset.height
-  });
-  mainWindow.setSize(preset.width + (chatPanelExpanded ? 300 : 0), preset.height);
+  const pos = clampWindowPosition(x, y, mainWindow, { width: preset.width, height: preset.height });
+  mainWindow.setSize(preset.width, preset.height);
   mainWindow.setPosition(pos.x, pos.y);
+  syncChatWindowPosition();
 
   notifySizeChanged();
-  mainWindow.webContents.send('pet-chat-panel-layout', { petWidth: preset.width });
+  syncChatWindowPosition();
   refreshTrayMenu();
 }
 
@@ -355,6 +403,11 @@ function createWindow() {
 
   mainWindow.on('move', () => {
     syncSpeechWindowPosition();
+    syncChatWindowPosition();
+  });
+
+  mainWindow.on('resize', () => {
+    syncChatWindowPosition();
   });
 
   mainWindow.on('show', () => {
@@ -372,7 +425,6 @@ function createWindow() {
 
   mainWindow.webContents.on('did-finish-load', () => {
     notifySizeChanged();
-    mainWindow.webContents.send('pet-chat-panel-layout', { petWidth: preset.width });
 
     const config = loadConfig();
     mainWindow.webContents.send('pet-breathing-mode-changed', config.breathingMode || 'subtle');
@@ -383,6 +435,10 @@ function createWindow() {
     if (speechWindow && !speechWindow.isDestroyed()) {
       speechWindow.close();
       speechWindow = null;
+    }
+    if (chatWindow && !chatWindow.isDestroyed()) {
+      chatWindow.close();
+      chatWindow = null;
     }
     mainWindow = null;
   });
@@ -664,17 +720,28 @@ ipcMain.handle('pet-toggle-pause', () => {
 ipcMain.handle('pet-get-pause-state', () => isPaused);
 ipcMain.handle('pet-get-size-mode', () => currentSizeMode);
 ipcMain.handle('pet-set-chat-panel-visible', (event, visible) => {
-  if (event.sender !== mainWindow?.webContents || !mainWindow || mainWindow.isDestroyed()) return { ok: false };
-  chatPanelExpanded = !!visible;
-  const preset = getSizePreset(currentSizeMode);
-  const [x, y] = mainWindow.getPosition();
-  const width = preset.width + (chatPanelExpanded ? 300 : 0);
-  const height = preset.height;
-  const bounds = clampWindowPosition(x, y, mainWindow, { width, height });
-  mainWindow.setSize(width, height);
-  mainWindow.setPosition(bounds.x, bounds.y);
-  syncSpeechWindowPosition();
-  return { ok: true, petWidth: preset.width, expanded: chatPanelExpanded };
+  const isPetRenderer = event.sender === mainWindow?.webContents;
+  const isChatRenderer = event.sender === chatWindow?.webContents;
+  if (!isPetRenderer && !isChatRenderer) return { ok: false };
+  chatPanelVisible = !!visible;
+  if (chatPanelVisible) {
+    const window = createChatWindow();
+    syncChatWindowPosition();
+    window.setAlwaysOnTop(true, 'screen-saver');
+    window.show();
+    window.focus();
+  } else if (chatWindow && !chatWindow.isDestroyed()) {
+    chatWindow.hide();
+  }
+  mainWindow?.webContents.send('pet-chat-panel-visibility', chatPanelVisible);
+  return { ok: true, visible: chatPanelVisible };
+});
+ipcMain.on('pet-chat-window-resize', (event, size) => {
+  if (event.sender !== chatWindow?.webContents || !chatWindow || chatWindow.isDestroyed()) return;
+  const width = Math.min(300, Math.max(150, Math.round(Number(size?.width) || 176)));
+  const height = Math.min(140, Math.max(36, Math.round(Number(size?.height) || 40)));
+  chatWindow.setSize(width, height);
+  syncChatWindowPosition();
 });
 ipcMain.handle('pet-get-breathing-mode', () => loadConfig().breathingMode || 'subtle');
 ipcMain.handle('pet-get-show-pet-bounds', () => !!loadConfig().showPetBounds);
@@ -817,14 +884,14 @@ ipcMain.handle('gateway-manage', async (event, { action, payload } = {}) => {
 
 // Cancel a generation only when requested by its originating pet renderer.
 ipcMain.on('pet-chat-cancel', event => {
-  if (event.sender !== mainWindow?.webContents) return;
+  if (event.sender !== mainWindow?.webContents && event.sender !== chatWindow?.webContents) return;
   activeDialogue?.controller.abort();
   speechService.stop();
 });
 
 // Keep request ownership in the main process and relay one normalized event stream.
 ipcMain.on('pet-chat-query-stream', async (event, payload) => {
-  if (event.sender !== mainWindow?.webContents) return;
+  if (event.sender !== mainWindow?.webContents && event.sender !== chatWindow?.webContents) return;
   const requestId = String(payload?.requestId || '').slice(0, 100);
   if (!requestId) return;
   activeDialogue?.controller.abort();

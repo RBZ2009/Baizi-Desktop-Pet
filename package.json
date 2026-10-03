@@ -32,6 +32,8 @@
       "preload.js",
       "renderer.js",
       "index.html",
+      "chat.html",
+      "chat-renderer.js",
       "gateway-manager.js",
       "speech-service.js",
       "gateway/**/*",
