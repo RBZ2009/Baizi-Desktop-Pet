@@ -6,7 +6,7 @@ const defaults = {
   baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   model: 'qwen-plus', apiKey: '', temperature: 0.8,
   contextWindow: 32768, maxOutputTokens: 2048, requestTimeoutMs: 90000,
-  autoMemory: true, memoryModel: '', ttsEnabled: false,
+  autoMemory: true, memoryModel: '', toolsEnabled: true, ttsEnabled: false,
   ttsVoice: 'Tingting', ttsRate: 180, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
 };
 
@@ -28,6 +28,7 @@ function normalizeSettings(input = {}) {
   }
   if (result.maxOutputTokens + 1024 >= result.contextWindow) throw new Error('上下文窗口必须大于输出预算加 1024。');
   result.autoMemory = !!result.autoMemory;
+  result.toolsEnabled = !!result.toolsEnabled;
   result.ttsEnabled = !!result.ttsEnabled;
   result.timeZone = String(result.timeZone || defaults.timeZone);
   try { new Intl.DateTimeFormat('zh-CN', { timeZone: result.timeZone }).format(); }

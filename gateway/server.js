@@ -31,7 +31,7 @@ async function createGateway({ token, settings, dataDir, legacyHistory = [] }) {
   const temporaryDir = !dataDir ? fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'baizi-gateway-test-')) : null;
   const storage = await Storage.open(dataDir || temporaryDir, legacyHistory);
   const memory = new MemoryService(storage, () => config);
-  const chat = new ChatService(storage, persona, memory);
+  const chat = new ChatService(storage, persona, memory, { workspaceRoot: process.env.BAIZI_TOOL_ROOT || process.cwd() });
   let active = null;
   const server = http.createServer(async (req, res) => {
     const supplied = Buffer.from(req.headers.authorization || '');

@@ -41,7 +41,7 @@ function textContent(content) {
 }
 
 // Keep one deadline active until the entire provider response has been consumed.
-async function chatCompletion(settings, messages, { signal, onDelta, model, json = false, maxTokens } = {}) {
+async function chatCompletion(settings, messages, { signal, onDelta, model, json = false, maxTokens, tools = [], toolChoice = 'auto' } = {}) {
   if (!settings.apiKey) throw new Error('请先在对话与记忆设置中填写 API Key。');
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -50,11 +50,13 @@ async function chatCompletion(settings, messages, { signal, onDelta, model, json
   let expired = false;
   const timer = setTimeout(() => { expired = true; controller.abort(); }, settings.requestTimeoutMs);
   try {
+    // Tool responses are kept non-streaming so fragmented function arguments cannot leak into user text.
+    const stream = !!onDelta && tools.length === 0;
     const response = await fetch(`${settings.baseUrl}/chat/completions`, {
       method: 'POST', signal: controller.signal,
       headers: { Authorization: `Bearer ${settings.apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: model || settings.model, messages, temperature: json ? 0.2 : settings.temperature,
-        max_tokens: maxTokens || settings.maxOutputTokens, stream: !!onDelta })
+        max_tokens: maxTokens || settings.maxOutputTokens, stream, ...(tools.length ? { tools, tool_choice: toolChoice } : {}) })
     });
     if (!response.ok) {
       await response.body?.cancel();
@@ -63,6 +65,7 @@ async function chatCompletion(settings, messages, { signal, onDelta, model, json
     let text = '';
     let usage = null;
     let finishReason = null;
+    let toolCalls = [];
     let streamCompleted = false;
     if ((response.headers.get('content-type') || '').includes('text/event-stream')) {
       if (!response.body) throw new Error('模型没有返回响应流。');
@@ -83,14 +86,20 @@ async function chatCompletion(settings, messages, { signal, onDelta, model, json
     } else {
       const event = await response.json();
       if (event.error) throw new Error('模型返回了错误事件。');
-      text = textContent(event.choices?.[0]?.message?.content);
+      const message = event.choices?.[0]?.message || {};
+      text = textContent(message.content);
+      toolCalls = Array.isArray(message.tool_calls) ? message.tool_calls.map((call, index) => ({
+        id: String(call.id || `tool_call_${index}`),
+        type: 'function',
+        function: { name: String(call.function?.name || ''), arguments: String(call.function?.arguments || '{}') }
+      })).filter(call => call.function.name) : [];
       finishReason = event.choices?.[0]?.finish_reason;
       usage = event.usage;
       if (text) onDelta?.(text);
     }
     if (text.length > 200000) throw new Error('模型回复超过长度限制。');
-    if (!text.trim()) throw new Error('模型未返回可读回复。');
-    return { text, usage, finishReason };
+    if (!text.trim() && !toolCalls.length) throw new Error('模型未返回可读回复。');
+    return { text, usage, finishReason, toolCalls };
   } catch (error) {
     if (expired) throw new Error('模型请求超时，请稍后重试。');
     if (signal?.aborted) throw Object.assign(new Error('请求已取消。'), { name: 'AbortError' });

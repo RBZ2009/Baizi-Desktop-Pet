@@ -8,6 +8,7 @@ const http = require('node:http');
 const { createGateway } = require('../gateway/server');
 const { chatCompletion, readSse } = require('../gateway/provider');
 const { normalizeSettings } = require('../gateway/settings');
+const { executeTool } = require('../gateway/tools/tool-registry');
 
 // Run provider requests against a disposable local HTTP server.
 async function mockProvider(handler) {
@@ -90,4 +91,33 @@ test('a stream cut short is rejected instead of being committed as a complete re
   });
   try { await assert.rejects(chatCompletion(provider.settings, [], { onDelta() {} }), /意外结束/); }
   finally { await provider.close(); }
+});
+
+test('gateway executes a model tool call and feeds the result back before replying', async () => {
+  const provider = await mockProvider((req, res) => {
+    let input = '';
+    req.on('data', chunk => input += chunk);
+    req.on('end', () => {
+      const body = JSON.parse(input);
+      const hasToolResult = body.messages.some(message => message.role === 'tool');
+      if (!hasToolResult) {
+        return res.end(JSON.stringify({ choices: [{ finish_reason: 'tool_calls', message: { role: 'assistant', content: null, tool_calls: [
+          { id: 'call_time', type: 'function', function: { name: 'get_current_time', arguments: '{}' } }
+        ] } }] }));
+      }
+      res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: '现在是本地时间。' } }] }));
+    });
+  });
+  const gateway = await createGateway({ token: 'test-token', settings: provider.settings });
+  const response = await fetch(`http://127.0.0.1:${gateway.port}/chat`, { method: 'POST', headers: { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt: '现在几点？' }) });
+  const events = [];
+  try {
+    for await (const data of readSse(response.body)) events.push(JSON.parse(data));
+    assert.deepEqual(events.map(event => event.type), ['start', 'context', 'tool', 'tool', 'chunk', 'done']);
+    assert.equal(events.at(-1).text, '现在是本地时间。');
+  } finally { await gateway.close(); await provider.close(); }
+});
+
+test('command tool refuses commands outside its read-only allowlist', async () => {
+  await assert.rejects(executeTool('run_command', JSON.stringify({ command: 'rm -rf .' }), { workspaceRoot: process.cwd() }), /允许列表/);
 });

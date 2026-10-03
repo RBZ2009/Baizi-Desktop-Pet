@@ -4,9 +4,16 @@
  */
 const { ContextManager } = require('./context-manager');
 const { chatCompletion } = require('./provider');
+const { definitions: toolDefinitions, executeTool, clip: clipToolOutput } = require('./tools/tool-registry');
 
 class ChatService {
-  constructor(storage, persona, memoryService) { this.storage = storage; this.context = new ContextManager(storage, persona); this.memory = memoryService; this.tail = null; }
+  constructor(storage, persona, memoryService, toolOptions = {}) {
+    this.storage = storage;
+    this.context = new ContextManager(storage, persona);
+    this.memory = memoryService;
+    this.toolOptions = toolOptions;
+    this.tail = null;
+  }
 
   // Wait for an aborted predecessor to persist its final state before assembling a new context.
   async run(prompt, settings, signal, send) {
@@ -20,9 +27,31 @@ class ChatService {
       try {
         const context = await this.context.build(session.id, prompt, settings, signal);
         send({ type: 'context', ...context.stats });
-        const result = await chatCompletion(settings, context.messages, {
-          signal, onDelta: delta => { text += delta; send({ type: 'chunk', text: delta }); }
-        });
+        const messages = [...context.messages];
+        const tools = settings.toolsEnabled === false ? [] : toolDefinitions;
+        let result;
+        for (let round = 0; round < 4; round += 1) {
+          const wantsTools = tools.length > 0;
+          result = await chatCompletion(settings, messages, { signal, tools: wantsTools ? tools : [], toolChoice: 'auto' });
+          if (!result.toolCalls?.length) {
+            if (result.text) { text += result.text; send({ type: 'chunk', text: result.text }); }
+            break;
+          }
+          messages.push({ role: 'assistant', content: result.text || null, tool_calls: result.toolCalls });
+          for (const call of result.toolCalls) {
+            send({ type: 'tool', name: call.function.name, status: 'running' });
+            let output;
+            try {
+              output = await executeTool(call.function.name, call.function.arguments, { ...this.toolOptions, signal, timeZone: settings.timeZone });
+              send({ type: 'tool', name: call.function.name, status: 'complete' });
+            } catch (error) {
+              output = { error: error.message };
+              send({ type: 'tool', name: call.function.name, status: 'error', error: error.message });
+            }
+            messages.push({ role: 'tool', tool_call_id: call.id, content: clipToolOutput(JSON.stringify(output)) });
+          }
+        }
+        if (result?.toolCalls?.length && !text) throw new Error('工具调用次数超过上限，暂时无法完成这次请求。');
         if (signal.aborted) throw Object.assign(new Error('请求已取消。'), { name: 'AbortError' });
         this.storage.finishTurn(turn, result.text, result.finishReason === 'length' ? 'truncated' : 'complete');
         let memoryError = '';
