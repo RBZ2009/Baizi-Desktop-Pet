@@ -8,6 +8,7 @@
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const path = require('node:path');
+const { actionToolDefinition, normalizeAction } = require('../actions/action-registry');
 
 const execFileAsync = promisify(execFile);
 const MAX_TOOL_TEXT = 12000;
@@ -24,7 +25,8 @@ const definitions = [
   } } },
   { type: 'function', function: { name: 'run_command', description: '运行一个安全的只读本地诊断命令。只能从允许列表中选择，不能执行修改文件或任意 shell。', parameters: {
     type: 'object', properties: { command: { type: 'string', enum: ['pwd', 'date', 'whoami', 'uname', 'ls', 'git status', 'git log --oneline -5', 'npm test'] } }, required: ['command'], additionalProperties: false
-  } } }
+  } } },
+  actionToolDefinition
 ];
 
 // Keep external responses short so a web page cannot consume the conversation budget.
@@ -110,6 +112,7 @@ async function executeTool(name, rawArguments, options = {}) {
   if (name === 'get_weather') return getWeather(args, options);
   if (name === 'search_web') return searchWeb(args, options);
   if (name === 'run_command') return runCommand(args, options);
+  if (name === 'set_pet_action') return normalizeAction(args);
   throw new Error('工具不可用。');
 }
 

@@ -39,11 +39,11 @@ class ChatService {
           }
           messages.push({ role: 'assistant', content: result.text || null, tool_calls: result.toolCalls });
           for (const call of result.toolCalls) {
-            send({ type: 'tool', name: call.function.name, status: 'running' });
+            send({ type: 'tool', name: call.function.name, status: 'running', arguments: call.function.arguments });
             let output;
             try {
               output = await executeTool(call.function.name, call.function.arguments, { ...this.toolOptions, signal, timeZone: settings.timeZone });
-              send({ type: 'tool', name: call.function.name, status: 'complete' });
+              send({ type: 'tool', name: call.function.name, status: 'complete', result: output });
             } catch (error) {
               output = { error: error.message };
               send({ type: 'tool', name: call.function.name, status: 'error', error: error.message });

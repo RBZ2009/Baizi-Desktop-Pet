@@ -61,6 +61,11 @@ contextBridge.exposeInMainWorld('desktopPet', {
     ipcRenderer.on('pet-chat-stream', handler);
     return () => ipcRenderer.removeListener('pet-chat-stream', handler);
   },
+  onPetAction: (callback) => {
+    const handler = (_event, action) => callback(action);
+    ipcRenderer.on('pet-action-request', handler);
+    return () => ipcRenderer.removeListener('pet-action-request', handler);
+  },
   setSpeechText: (text) => ipcRenderer.send('speech-set-text', text),
   hideSpeech: () => ipcRenderer.send('speech-hide'),
   getDialogueSettings: () => ipcRenderer.invoke('pet-get-dialogue-settings'),

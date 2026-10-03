@@ -1013,6 +1013,19 @@ function setAction(name, durationMs = 0) {
   updateDebug();
 }
 
+// Apply only validated action commands delivered by the gateway tool bridge.
+function applyModelAction(command) {
+  const allowed = new Set(['idle', 'wave', 'walk', 'sit', 'sillyDance', 'hipHop', 'praying', 'jump']);
+  const action = String(command?.action || '');
+  if (!allowed.has(action) || isPaused) return;
+  const duration = Math.max(0, Math.min(10000, Number(command?.durationMs) || 0));
+  const effectiveDuration = action === 'wave' && duration === 0 ? 1800 : duration;
+  if (['wave', 'sillyDance', 'hipHop', 'jump'].includes(action)) setExpression(VRMExpressionPresetName.Joy, 1);
+  setAction(action, effectiveDuration);
+}
+
+window.desktopPet?.onPetAction?.(applyModelAction);
+
 // 鼠标全屏跟随：即使鼠标不在桌宠窗口内，也会持续看向鼠标
 let look = { x: 0, y: 0 };
 

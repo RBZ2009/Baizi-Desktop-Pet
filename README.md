@@ -62,7 +62,7 @@ xattr -d com.apple.quarantine *.command
 
 回复气泡是独立的置顶窗口，会根据角色窗口和当前显示器工作区自动计算位置；内容较长或角色靠近屏幕顶部时，会在角色下方显示并自动避开屏幕边界。气泡不会改变角色窗口的尺寸或拖动区域。
 
-人设位于 `gateway/prompts/baizi.md`，在原服务的可爱、贴心、自然、适度调皮风格上补充了冷静直接、行动派和桌面陪伴者的角色层次。网关当前提供四个受限工具：本地时间、城市天气、公开网页搜索和只读本地诊断命令。工具结果会经过网关验证和长度限制；命令工具只允许固定的只读命令，不执行任意 shell。
+人设位于 `gateway/prompts/baizi.md`，在原服务的可爱、贴心、自然、适度调皮风格上补充了冷静直接、行动派和桌面陪伴者的角色层次。网关当前提供时间、城市天气、公开网页搜索、只读本地诊断和受限桌宠动作五类工具。工具结果会经过网关验证和长度限制；命令工具只允许固定的只读命令，不执行任意 shell。动作请求通过主进程和 preload 桥接到渲染端，只能选择现有动作库中的名称。
 
 ## 本地数据和凭据
 
@@ -96,7 +96,8 @@ main.js / preload.js / renderer.js  桌宠窗口、交互与受控 IPC
    server.js                       本机 HTTP 接口与认证
    provider.js                     兼容模型接口和 SSE 解析
    chat-service.js                 对话串行执行、取消与状态保存
-   tools/tool-registry.js          时间、天气、网页搜索和只读命令工具
+   tools/tool-registry.js          时间、天气、搜索、命令和动作工具注册
+   actions/action-registry.js      模型可用的动作协议和参数校验
    context-manager.js              预算、摘要和相关记忆召回
    memory-service.js               后台提取与有限重试
    storage.js                      SQLite 事务和原子落盘

@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { GatewayManager } = require('./gateway-manager');
 const { SpeechService } = require('./speech-service');
+const { normalizeAction } = require('./gateway/actions/action-registry');
 const speechService = new SpeechService();
 
 let mainWindow;
@@ -933,6 +934,14 @@ ipcMain.on('pet-chat-query-stream', async (event, payload) => {
     if (data.type === 'chunk') speechService.append(data.text);
     if (data.type === 'done') speechService.finish();
     if (data.type === 'error' || data.type === 'cancelled') speechService.stop();
+    if (data.type === 'tool' && data.name === 'set_pet_action' && data.status === 'complete') {
+      try {
+        const action = normalizeAction(data.result);
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('pet-action-request', action);
+      } catch (_) {
+        // The gateway already validates actions; ignore malformed relay data defensively.
+      }
+    }
     if (activeDialogue === state && !event.sender.isDestroyed()) event.sender.send('pet-chat-stream', { requestId, ...data });
   };
   const disconnect = () => state.controller.abort();

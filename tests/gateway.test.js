@@ -121,3 +121,8 @@ test('gateway executes a model tool call and feeds the result back before replyi
 test('command tool refuses commands outside its read-only allowlist', async () => {
   await assert.rejects(executeTool('run_command', JSON.stringify({ command: 'rm -rf .' }), { workspaceRoot: process.cwd() }), /允许列表/);
 });
+
+test('action tool normalizes a supported animation command', async () => {
+  assert.deepEqual(await executeTool('set_pet_action', JSON.stringify({ action: 'wave', durationMs: 1800 })), { action: 'wave', durationMs: 1800 });
+  await assert.rejects(executeTool('set_pet_action', JSON.stringify({ action: 'deleteFiles' })), /动作不在允许列表/);
+});
