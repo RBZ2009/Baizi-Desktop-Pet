@@ -27,7 +27,7 @@ function resizeChatWindow() {
 }
 
 function formatSpeechText(text) {
-  return String(text || '').replace(/\s+\n/g, '\n').replace(/\n\s+/g, '\n');
+  return String(text || '');
 }
 
 function setSpeech(text, closable) {

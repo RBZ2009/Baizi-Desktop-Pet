@@ -1,0 +1,25 @@
+/* Responsibility: Keep Markdown readable in both narrow bubbles and history messages.
+ * Implementation: 1. Scope typography to message bodies. 2. Preserve code whitespace.
+ * 3. Scroll wide tables and equations without expanding their parent windows.
+ */
+.markdown-content { white-space: normal; overflow-wrap: anywhere; min-width: 0; line-height: 1.6; }
+.markdown-content p { margin: 0 0 .65em; }
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content > :last-child { margin-bottom: 0; }
+.markdown-content strong { font-weight: 750; }
+.markdown-content ul, .markdown-content ol { margin: .5em 0; padding-left: 1.8em; }
+.markdown-content li { margin: .2em 0; }
+.markdown-content li p { margin: .3em 0; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3,
+.markdown-content h4, .markdown-content h5, .markdown-content h6 { font-size: 1.1em; margin: .8em 0 .4em; line-height: 1.4; }
+.markdown-content a { color: #91d1ff; text-decoration: underline; }
+.markdown-content code { padding: .12em .3em; border-radius: 4px; background: rgba(128, 151, 170, .18); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .92em; }
+.markdown-content pre { margin: .6em 0; padding: .65em; border-radius: 6px; background: rgba(128, 151, 170, .14); overflow: auto; max-width: 100%; white-space: pre; }
+.markdown-content pre code { padding: 0; background: transparent; white-space: inherit; }
+.markdown-content blockquote { margin: .6em 0; padding-left: .8em; border-left: 3px solid rgba(128, 151, 170, .5); }
+.markdown-content table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; margin: .6em 0; }
+.markdown-content th, .markdown-content td { padding: .3em .6em; border: 1px solid rgba(128, 151, 170, .4); }
+.markdown-content .math-block { display: block; margin: .6em 0; overflow-x: auto; overflow-y: hidden; max-width: 100%; }
+.markdown-content .katex { font-size: 1.08em; overflow-wrap: normal; }
+.markdown-content .katex-display { margin: .4em 0; padding: .2em 0; }
+.message-label { white-space: normal; }

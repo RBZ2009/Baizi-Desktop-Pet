@@ -840,6 +840,16 @@ ipcMain.handle('pet-restart-app', async () => {
   return { ok: true };
 });
 
+// Open only HTTP(S) message links from the two local Markdown surfaces.
+ipcMain.handle('dialogue-open-link', async (event, value) => {
+  const allowed = ['ui/dialogue.html', 'ui/speech.html'].map(file => require('node:url').pathToFileURL(path.join(__dirname, file)).href);
+  if (!allowed.includes(event.senderFrame?.url)) throw new Error('不允许此页面打开链接。');
+  const url = new URL(String(value));
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error('只支持公开 HTTP/HTTPS 链接。');
+  await require('electron').shell.openExternal(url.href);
+  return { ok: true };
+});
+
 // Restrict settings and database controls to the sandboxed management page.
 function requireManagementSender(event) {
   const expected = require('node:url').pathToFileURL(path.join(__dirname, 'ui/dialogue.html')).href;

@@ -2,12 +2,18 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; font-src 'self'; img-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'">
   <title>白子的回复</title>
   <link rel="stylesheet" href="speech.css">
+  <link rel="stylesheet" href="../node_modules/katex/dist/katex.min.css">
+  <link rel="stylesheet" href="markdown.css">
 </head>
 <body>
-  <div id="bubble" hidden><div id="text" role="status"></div></div>
+  <div id="bubble" hidden><div id="text" class="markdown-content" role="status"></div></div>
+  <script src="../node_modules/markdown-it/dist/markdown-it.min.js"></script>
+  <script src="../node_modules/katex/dist/katex.min.js"></script>
+  <script src="../node_modules/markdown-it-texmath/texmath.js"></script>
+  <script src="markdown.js"></script>
   <script src="speech.js"></script>
 </body>
 </html>

@@ -1,6 +1,6 @@
 /**
  * Responsibility: Configure the local conversation provider and present management results.
- * Implementation: 1. Use the fixed preload bridge. 2. Keep secrets write-only. 3. Render errors and data as text.
+ * Implementation: 1. Use the fixed preload bridge. 2. Keep secrets write-only. 3. Render history with the shared safe Markdown renderer.
  */
 const api = window.dialogue;
 const notice = document.getElementById('notice');
@@ -78,6 +78,17 @@ async function loadProfile() {
 function card(text) {
   const element = document.createElement('div'); element.className = 'card';
   const paragraph = document.createElement('p'); paragraph.textContent = text; element.append(paragraph);
+  return element;
+}
+
+// Keep message metadata as text and render only the message body as Markdown.
+function messageCard(label, content) {
+  const element = document.createElement('div'); element.className = 'card';
+  const heading = document.createElement('p'); heading.className = 'message-label'; heading.textContent = label;
+  const body = document.createElement('div'); body.className = 'markdown-content';
+  if (window.baiziMarkdown) body.innerHTML = window.baiziMarkdown(content);
+  else body.textContent = content;
+  element.append(heading, body);
   return element;
 }
 
@@ -173,12 +184,12 @@ async function showHistory() {
   const list = document.getElementById('history-list'); list.replaceChildren();
   document.getElementById('session-status').textContent = id === currentSessionId ? '这是当前正在使用的会话。' : '正在查看历史会话；点击“继续选中的会话”切换。';
   const session = sessionRecords.find(item => item.id === id);
-  if (session?.summary) list.append(card(`较早对话摘要（覆盖到消息 ${session.summary_through}）\n${session.summary}`));
+  if (session?.summary) list.append(messageCard(`较早对话摘要（覆盖到消息 ${session.summary_through}）`, session.summary));
   const status = await api.status();
   if (status.summaryError) list.append(card(`最近摘要未更新：${status.summaryError}\n原始对话仍然保留。`));
   const statuses = { complete: '完成', failed: '失败', interrupted: '已打断', pending: '生成中', truncated: '达到输出上限' };
   if (!result.messages.length) list.append(card('这个会话还没有消息。'));
-  for (const message of result.messages) list.append(card(`${message.role === 'user' ? '你' : '白子'} · ${statuses[message.status] || message.status}\n${message.content || '（没有生成内容）'}`));
+  for (const message of result.messages) list.append(messageCard(`${message.role === 'user' ? '你' : '白子'} · ${statuses[message.status] || message.status}`, message.content || '（没有生成内容）'));
 }
 document.getElementById('session-select').addEventListener('change', () => showHistory().catch(error => showNotice(error.message)));
 document.getElementById('refresh-history').addEventListener('click', () => loadHistory().catch(error => showNotice(error.message)));

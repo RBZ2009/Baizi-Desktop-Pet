@@ -1,11 +1,20 @@
 /**
  * Responsibility: Render and measure streamed reply text in a separate bounded window.
- * Implementation: 1. Use text nodes. 2. Scroll long replies without truncating them. 3. Keep the pointer directed at the role anchor.
+ * Implementation: 1. Render trusted Markdown/KaTeX HTML from the local renderer. 2. Scroll long replies without truncating them. 3. Keep the pointer directed at the role anchor.
  */
 const bubble = document.getElementById('bubble');
 const text = document.getElementById('text');
+const renderMarkdown = window.baiziMarkdown;
 let closable = false;
 let holdTimer = null;
+
+// Font loading can change fraction and matrix heights after the first render.
+function measureBubble() {
+  if (bubble.hidden) return;
+  const bounds = bubble.getBoundingClientRect();
+  window.speechOverlay.resize(Math.ceil(bounds.width) + 20, Math.ceil(bounds.height) + 20);
+}
+document.fonts.addEventListener('loadingdone', measureBubble);
 
 // Release the close gesture when the pointer leaves or the response changes.
 function clearHold() { clearTimeout(holdTimer); holdTimer = null; }
@@ -22,10 +31,10 @@ window.speechOverlay.onText(payload => {
   bubble.hidden = false;
   bubble.style.width = `${width}px`;
   bubble.classList.toggle('holdable', closable);
-  text.textContent = content;
+  if (renderMarkdown) text.innerHTML = renderMarkdown(content);
+  else text.replaceChildren(document.createTextNode(content));
   text.style.maxHeight = `${Math.max(30, Math.min(298, (Number(payload?.maxHeight) || 340) - 44))}px`;
-  const height = Math.ceil(bubble.getBoundingClientRect().height) + 20;
-  window.speechOverlay.resize(Math.ceil(width) + 20, height);
+  measureBubble();
   if (!closable) text.scrollTop = text.scrollHeight;
 });
 

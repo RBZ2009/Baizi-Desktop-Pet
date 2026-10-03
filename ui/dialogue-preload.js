@@ -7,5 +7,6 @@ contextBridge.exposeInMainWorld('dialogue', {
   getSettings: () => ipcRenderer.invoke('gateway-settings-get'),
   saveSettings: settings => ipcRenderer.invoke('gateway-settings-save', settings),
   status: () => ipcRenderer.invoke('gateway-status'),
-  manage: (action, payload) => ipcRenderer.invoke('gateway-manage', { action, payload })
+  manage: (action, payload) => ipcRenderer.invoke('gateway-manage', { action, payload }),
+  openLink: url => ipcRenderer.invoke('dialogue-open-link', url)
 });

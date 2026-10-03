@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'">
-<title>白子 · 对话与记忆</title><link rel="stylesheet" href="dialogue.css"></head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; font-src 'self'; img-src 'none'; connect-src 'none'; object-src 'none'; base-uri 'none'">
+<title>白子 · 对话与记忆</title><link rel="stylesheet" href="dialogue.css"><link rel="stylesheet" href="../node_modules/katex/dist/katex.min.css"><link rel="stylesheet" href="markdown.css"></head>
 <body><header><h1>对话与记忆</h1><p>白子的人设与记忆在本机管理，回复由你配置的模型 API 生成。</p></header>
 <nav><button data-tab="settings" class="selected">模型设置</button><button data-tab="profile">用户档案</button><button data-tab="memories">长期记忆</button><button data-tab="history">会话历史</button></nav>
 <p id="notice" role="status"></p>
@@ -42,4 +42,8 @@
 <p class="hint">新会话清空短期上下文，长期记忆仍保留。切换会话会停止当前回复和播报。</p>
 <label>查看会话<select id="session-select"></select></label><button id="select-session">继续选中的会话</button>
 <p id="session-status" class="muted"></p><div id="history-list"></div></section>
+<script src="../node_modules/markdown-it/dist/markdown-it.min.js"></script>
+<script src="../node_modules/katex/dist/katex.min.js"></script>
+<script src="../node_modules/markdown-it-texmath/texmath.js"></script>
+<script src="markdown.js"></script>
 <script src="dialogue.js"></script></body></html>

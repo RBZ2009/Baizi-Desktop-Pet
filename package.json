@@ -17,7 +17,10 @@
     "@pixiv/three-vrm": "^3.4.2",
     "@pixiv/three-vrm-animation": "^3.5.0",
     "sql.js": "^1.14.2",
-    "three": "^0.180.0"
+    "three": "^0.180.0",
+    "katex": "^0.16.47",
+    "markdown-it": "^14.3.2",
+    "markdown-it-texmath": "^1.0.0"
   },
   "devDependencies": {
     "electron": "^44.5.1",
