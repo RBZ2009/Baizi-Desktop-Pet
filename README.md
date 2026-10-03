@@ -31,6 +31,12 @@ npm start
 ```
 
 macOS 也可双击 `install-start.command` 准备依赖，之后双击 `start.command`。环境准备脚本位于 `scripts/`，Windows 对应 `scripts/setup-env.ps1`。
+
+### 工作区、命令和主动陪伴
+
+首次启动会在系统“文稿”目录创建 `Baizi-Desktop-Pet-Workspace`，默认权限为仅当前用户可读写。对话设置中的“工作区与主动陪伴”可以查看权限申请、批准或拒绝目录访问，也可以撤销已经批准的目录。白子的 `run_command` 工具只在已批准目录中运行，并由 macOS `sandbox-exec` 限制文件访问、网络和进程环境；命令有 15 秒超时和输出上限。工具开关和受控工作区命令开关需要在设置中主动开启。
+
+开启“允许白子偶尔主动提醒”后，白子会在 09:00～23:00 之间按设置的间隔发出低频提醒。暂停桌宠、正在对话或关闭选项时不会打扰；修改间隔会在下一次检查时生效。
 若已安装 Homebrew，安装脚本可自动安装缺失的 Node；否则会提示手动安装 Node。
 当前聊天和系统语音不使用 Python。`archive/legacy-tts/` 中的旧 Python TTS 示例仅作历史参考，不被应用调用或打包。
 

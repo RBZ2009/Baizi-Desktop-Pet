@@ -8,7 +8,8 @@ class ProactiveService {
     this.intervalMinutes = intervalMinutes; this.getIntervalMinutes = getIntervalMinutes; this.isEnabled = isEnabled; this.isPaused = isPaused; this.isBusy = isBusy; this.emit = emit; this.timer = null; this.last = 0;
   }
   interval() { return Math.max(30, Number(this.getIntervalMinutes?.() || this.intervalMinutes) || 120); }
-  start() { this.stop(); this.timer = setInterval(() => this.tick(), this.interval() * 60000); }
+  // Check frequently so a changed interval or pause setting takes effect without restarting the app.
+  start() { this.stop(); this.timer = setInterval(() => this.tick(), 60000); }
   stop() { if (this.timer) clearInterval(this.timer); this.timer = null; }
   tick(now = Date.now()) {
     if (!this.isEnabled() || this.isPaused() || this.isBusy() || now - this.last < this.interval() * 60000) return false;
