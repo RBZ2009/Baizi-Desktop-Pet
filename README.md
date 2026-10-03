@@ -58,7 +58,7 @@ xattr -d com.apple.quarantine *.command
 
 ## 语音、人设与能力
 
-对话与记忆设置中可开启 **macOS 系统语音**。默认中文声音为 `Tingting`，可调整声音和语速；系统已安装声音可在终端用 `say -v '?'` 查看。按完整句子排队播放，新请求和停止操作会中断旧播报。语音失败不影响已生成文字。
+对话与记忆设置中可开启 **macOS 系统语音**。默认中文声音为 `Tingting`，可调整声音和语速；系统已安装声音可在终端用 `say -v '?'` 查看。按完整句子排队播放，新请求和停止操作会中断旧播报。语音失败不影响已生成文字。实时双向语音的传输、临时凭据和回退设计见 [`docs/VOICE_ARCHITECTURE.md`](docs/VOICE_ARCHITECTURE.md)，当前版本默认不启用实时语音。
 
 回复气泡是独立的置顶窗口，会根据角色窗口和当前显示器工作区自动计算位置；内容较长或角色靠近屏幕顶部时，会在角色下方显示并自动避开屏幕边界。气泡不会改变角色窗口的尺寸或拖动区域。
 
@@ -106,6 +106,7 @@ main.js / preload.js / renderer.js  桌宠窗口、交互与受控 IPC
  tests/                            模拟服务及 Electron 集成验证
  archive/legacy-tts/              不参与运行的旧版 Python/Qwen TTS 示例
  archive/legacy-launch/           不参与运行的旧版 Windows 启动脚本
+ docs/VOICE_ARCHITECTURE.md       实时语音接入边界和实施顺序
 ```
 
 3D 模型放在 `assets/model.vrm`，缺失时回退到 `assets/pet.png`。页面实际引用的 `vendor/three/` 随源码和应用一起保留。
