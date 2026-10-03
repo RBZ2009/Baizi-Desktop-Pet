@@ -7,8 +7,11 @@ const fs = require('fs');
 const path = require('path');
 const { GatewayManager } = require('./gateway-manager');
 const { SpeechService } = require('./speech-service');
+const { VoiceSession } = require('./gateway/voice/session');
+const { DialogueState } = require('./dialogue-state');
 const { normalizeAction } = require('./gateway/actions/action-registry');
 const speechService = new SpeechService();
+const voiceSession = new VoiceSession({ fallback: speechService });
 
 let mainWindow;
 let speechWindow = null;
@@ -70,6 +73,16 @@ function saveConfig(config) {
 
 let gatewayManager = null;
 let activeDialogue = null;
+const dialogueState = new DialogueState(payload => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('pet-dialogue-state', payload);
+});
+
+// Cancel visual state and voice immediately, then let the request's abort handler settle its stream.
+function cancelDialogue() {
+  dialogueState.cancel();
+  activeDialogue?.controller.abort();
+  voiceSession.cancel();
+}
 // Create the gateway manager after Electron is ready so safeStorage is available.
 function getGateway() {
   if (!gatewayManager) gatewayManager = new GatewayManager(app.getPath('userData'), loadConfig().chatHistory || []);
@@ -873,7 +886,7 @@ ipcMain.handle('gateway-manage', async (event, { action, payload } = {}) => {
     memories: '/memories', saveMemory: '/memory/save', deleteMemory: '/memory/delete', memorySource: '/memory/source', retryMemory: '/memory/retry', export: '/export',
     profile: '/profile', saveProfile: '/profile/save', clearProfile: '/profile/clear' };
   if (!routes[action]) throw new Error('不支持的管理操作。');
-  if (['newSession', 'selectSession'].includes(action)) { activeDialogue?.controller.abort(); speechService.stop(); }
+  if (['newSession', 'selectSession'].includes(action)) cancelDialogue();
   const result = await getGateway().request(routes[action], payload || {});
   if (action === 'export') {
     const choice = await dialog.showSaveDialog(BrowserWindow.fromWebContents(event.sender), {
@@ -889,8 +902,7 @@ ipcMain.handle('gateway-manage', async (event, { action, payload } = {}) => {
 // Cancel a generation only when requested by its originating pet renderer.
 ipcMain.on('pet-chat-cancel', event => {
   if (event.sender !== mainWindow?.webContents && event.sender !== chatWindow?.webContents) return;
-  activeDialogue?.controller.abort();
-  speechService.stop();
+  cancelDialogue();
 });
 
 // Keep request ownership in the main process and relay one normalized event stream.
@@ -899,34 +911,43 @@ ipcMain.on('pet-chat-query-stream', async (event, payload) => {
   const requestId = String(payload?.requestId || '').slice(0, 100);
   if (!requestId) return;
   activeDialogue?.controller.abort();
-  const state = { sender: event.sender, controller: new AbortController() };
+  const state = { sender: event.sender, controller: new AbortController(), token: dialogueState.begin(requestId) };
   activeDialogue = state;
-  speechService.begin(getGateway().getSettings(), status => {
-    if (!event.sender.isDestroyed()) event.sender.send('pet-speech-status', { requestId, ...status });
-  });
   const send = data => {
     if (activeDialogue !== state) return;
-    if (data.type === 'chunk') speechService.append(data.text);
-    if (data.type === 'done') speechService.finish();
-    if (data.type === 'error' || data.type === 'cancelled') speechService.stop();
+    if (state.controller.signal.aborted && data.type !== 'cancelled') return;
+    if (data.type === 'chunk') voiceSession.appendText(data.text);
+    if (data.type === 'done') voiceSession.finishText();
+    if (data.type === 'error' || data.type === 'cancelled') voiceSession.cancel(data.type);
+    dialogueState.text(state.token, data.type, speechService.pending);
     if (data.type === 'tool' && data.name === 'set_pet_action' && data.status === 'complete') {
       try {
         const action = normalizeAction(data.result);
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('pet-action-request', action);
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('pet-action-request', {
+          ...action, requestId, sequence: state.token.sequence
+        });
       } catch (_) {
         // The gateway already validates actions; ignore malformed relay data defensively.
       }
     }
     if (activeDialogue === state && !event.sender.isDestroyed()) event.sender.send('pet-chat-stream', { requestId, ...data });
   };
-  const disconnect = () => state.controller.abort();
+  const disconnect = () => { if (activeDialogue === state) cancelDialogue(); };
   event.sender.once('destroyed', disconnect);
   try {
+    voiceSession.beginFallback(getGateway().getSettings(), status => {
+      if (dialogueState.current !== state.token || state.token.closed) return;
+      dialogueState.speech(state.token, status.type);
+      if (!event.sender.isDestroyed()) event.sender.send('pet-speech-status', { requestId, ...status });
+    });
     await getGateway().chat(String(payload?.prompt || ''), send, state.controller.signal);
   } catch (error) {
     send({ type: state.controller.signal.aborted ? 'cancelled' : 'error', error: error.message });
   } finally {
     event.sender.removeListener('destroyed', disconnect);
+    if (activeDialogue === state && !state.token.textDone && !state.token.closed) {
+      send({ type: state.controller.signal.aborted ? 'cancelled' : 'error', error: '回复流提前结束。' });
+    }
     if (activeDialogue === state) activeDialogue = null;
   }
 });
@@ -1010,4 +1031,4 @@ app.on('activate', () => {
 });
 
 // Abort background work and release the owned gateway when the app quits.
-app.on('before-quit', () => { activeDialogue?.controller.abort(); speechService.stop(); gatewayManager?.stop(); });
+app.on('before-quit', () => { activeDialogue?.controller.abort(); voiceSession.cancel('app-quit'); gatewayManager?.stop(); });
