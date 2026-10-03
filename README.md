@@ -60,6 +60,8 @@ xattr -d com.apple.quarantine *.command
 
 对话与记忆设置中可开启 **macOS 系统语音**。默认中文声音为 `Tingting`，可调整声音和语速；系统已安装声音可在终端用 `say -v '?'` 查看。按完整句子排队播放，新请求和停止操作会中断旧播报。语音失败不影响已生成文字。
 
+回复气泡是独立的置顶窗口，会根据角色窗口和当前显示器工作区自动计算位置；内容较长或角色靠近屏幕顶部时，会在角色下方显示并自动避开屏幕边界。气泡不会改变角色窗口的尺寸或拖动区域。
+
 人设位于 `gateway/prompts/baizi.md`，参考原服务的可爱、贴心、自然、适度调皮风格。时间由本机获取，可在设置中指定 IANA 时区（如 `Asia/Shanghai`）。当前没有联网搜索、实时天气、新闻或语音输入工具。
 
 ## 本地数据和凭据
@@ -97,9 +99,11 @@ main.js / preload.js / renderer.js  桌宠窗口、交互与受控 IPC
    context-manager.js              预算、摘要和相关记忆召回
    memory-service.js               后台提取与有限重试
    storage.js                      SQLite 事务和原子落盘
-   prompts/baizi.md                 角色设定
+ prompts/baizi.md                 角色设定
  ui/                               对话设置、记忆和历史管理页面
  tests/                            模拟服务及 Electron 集成验证
+ archive/legacy-tts/              不参与运行的旧版 Python/Qwen TTS 示例
+ archive/legacy-launch/           不参与运行的旧版 Windows 启动脚本
 ```
 
 3D 模型放在 `assets/model.vrm`，缺失时回退到 `assets/pet.png`。页面实际引用的 `vendor/three/` 随源码和应用一起保留。

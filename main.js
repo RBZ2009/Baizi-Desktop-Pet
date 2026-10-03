@@ -104,18 +104,32 @@ function syncSpeechWindowPosition() {
   if (!mainWindow || mainWindow.isDestroyed() || !speechWindow || speechWindow.isDestroyed()) return;
   const [x, y] = mainWindow.getPosition();
   const [w, h] = mainWindow.getSize();
-  const [, sh] = speechWindow.getContentSize();
+  const [sw, sh] = speechWindow.getContentSize();
+  const roleCenterX = x + Math.round(w / 2);
+  const anchorScreenY = y + Math.round(h * 0.42);
+  const display = screen.getDisplayMatching({ x: roleCenterX, y: anchorScreenY, width: 1, height: 1 });
+  const area = display?.workArea || screen.getPrimaryDisplay().workArea;
 
   const cfg = loadConfig();
   const anchorX = Number(cfg?.dialogue?.bubbleAnchorX);
-  const anchorY = Number(cfg?.dialogue?.bubbleAnchorY);
+  const anchorYRatio = Number(cfg?.dialogue?.bubbleAnchorY);
   const ax = Number.isFinite(anchorX) ? anchorX : defaultConfig.dialogue.bubbleAnchorX;
-  const ay = Number.isFinite(anchorY) ? anchorY : defaultConfig.dialogue.bubbleAnchorY;
+  const ay = Number.isFinite(anchorYRatio) ? anchorYRatio : defaultConfig.dialogue.bubbleAnchorY;
 
-  const nx = x + Math.round(w * ax);
-  const ny = y + Math.round(h * ay) - sh;
+  // Center the bubble on the configured role anchor and keep it inside the active display.
+  const preferredX = x + Math.round(w * ax) - Math.round(sw / 2);
+  const clampedX = Math.min(Math.max(area.x + 8, preferredX), Math.max(area.x + 8, area.x + area.width - sw - 8));
+  const roleAnchorY = y + Math.round(h * ay);
+  const aboveY = roleAnchorY - sh - 8;
+  const belowY = roleAnchorY + 8;
+  const fitsAbove = aboveY >= area.y + 8;
+  const fitsBelow = belowY + sh <= area.y + area.height - 8;
+  const placeBelow = !fitsAbove && fitsBelow;
+  const preferredY = placeBelow ? belowY : aboveY;
+  const clampedY = Math.min(Math.max(area.y + 8, preferredY), Math.max(area.y + 8, area.y + area.height - sh - 8));
 
-  speechWindow.setPosition(Math.round(nx), Math.max(0, Math.round(ny)));
+  speechWindow.setPosition(Math.round(clampedX), Math.round(clampedY));
+  speechWindow.webContents.send('speech-placement', { below: placeBelow });
 }
 
 function syncChatWindowPosition() {
@@ -295,13 +309,16 @@ function createSpeechWindow() {
 
   const html = `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"/><style>
     html,body{margin:0;padding:0;background:transparent;overflow:hidden}
-    #bubble{position:absolute;left:0;bottom:0;width:100%;min-height:44px;box-sizing:border-box;padding:8px 12px;border-radius:14px;
-      background:rgba(255,255,255,.94);color:#1f2937;font-size:12px;line-height:1.42;border:1px solid rgba(255,255,255,.9);
-      box-shadow:0 8px 22px rgba(0,0,0,.18);white-space:pre-wrap;overflow:hidden;display:none}
+    #bubble{position:absolute;left:0;bottom:0;width:100%;min-height:44px;box-sizing:border-box;padding:9px 13px;border-radius:15px;
+      background:rgba(233,242,250,.92);color:#1f2937;font-size:12px;line-height:1.46;border:1px solid rgba(255,255,255,.92);
+      box-shadow:0 10px 26px rgba(28,45,63,.2),inset 0 1px rgba(255,255,255,.9);backdrop-filter:blur(18px) saturate(135%);
+      -webkit-backdrop-filter:blur(18px) saturate(135%);white-space:pre-wrap;overflow:hidden;display:none}
     #bubble.show{display:block}
     #bubble.holdable{cursor:pointer}
-    #bubble:after{content:'';position:absolute;left:14px;bottom:-7px;width:12px;height:12px;background:rgba(255,255,255,.94);
-      border-left:1px solid rgba(255,255,255,.9);border-bottom:1px solid rgba(255,255,255,.9);transform:rotate(45deg)}
+    #bubble:after{content:'';position:absolute;left:22px;bottom:-7px;width:12px;height:12px;background:rgba(233,242,250,.92);
+      border-right:1px solid rgba(255,255,255,.92);border-bottom:1px solid rgba(255,255,255,.92);transform:rotate(45deg)}
+    #bubble.below{top:0;bottom:auto}
+    #bubble.below:after{top:-7px;bottom:auto;border-right:0;border-bottom:0;border-left:1px solid rgba(255,255,255,.92);border-top:1px solid rgba(255,255,255,.92)}
   </style></head><body><div id="bubble"></div><script>
     const { ipcRenderer } = require('electron');
     const bubble = document.getElementById('bubble');
@@ -338,6 +355,9 @@ function createSpeechWindow() {
         const h = Math.min(360, Math.max(56, bubble.scrollHeight + 8));
         ipcRenderer.send('speech-window-resize', { width: w, height: h });
       }, 0);
+    });
+    ipcRenderer.on('speech-placement', (_e, payload) => {
+      bubble.classList.toggle('below', !!payload?.below);
     });
     ipcRenderer.on('speech-hide', () => {
       bubble.classList.remove('show');
@@ -412,6 +432,14 @@ function createWindow() {
 
   mainWindow.on('show', () => {
     if (speechWindow && !speechWindow.isDestroyed()) {
+      speechWindow.showInactive();
+      syncSpeechWindowPosition();
+    }
+  });
+
+  mainWindow.on('focus', () => {
+    if (speechWindow && !speechWindow.isDestroyed() && speechWindow.isVisible()) {
+      speechWindow.setAlwaysOnTop(true, 'screen-saver');
       speechWindow.showInactive();
       syncSpeechWindowPosition();
     }
@@ -937,6 +965,7 @@ ipcMain.on('speech-set-text', (_event, payload) => {
     speechWindow.setIgnoreMouseEvents(true, { forward: true });
   }
   speechWindow.webContents.send('speech-set-text', { text, closable });
+  speechWindow.setAlwaysOnTop(true, 'screen-saver');
   if (!isPaused) speechWindow.showInactive();
   syncSpeechWindowPosition();
 });
