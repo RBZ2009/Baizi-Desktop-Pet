@@ -42,6 +42,7 @@ const defaultConfig = {
     large: 0.7
   },
   dialogue: {
+    bubbleMode: 'stack',
     bubbleAnchorX: 0.56, bubbleAnchorY: 0.34,
     bubbleAutoClose: true, bubblePerCharMs: 180, charsPerLine: 15
   }
@@ -572,6 +573,8 @@ function openPreferencesWindow() {
     <select id="behaviorStyle"><option value="playful">活泼</option><option value="balanced">平衡</option><option value="calm">安静</option></select>
     <label>呼吸效果</label>
     <select id="breathingMode"><option value="off">关闭</option><option value="subtle">轻微</option><option value="normal">标准</option></select>
+    <label>回复气泡显示方式</label>
+    <select id="bubbleMode"><option value="stack">堆叠</option><option value="replace">消息替换</option></select>
   </div>
   <div id="ai" class="panel"><button id="openDialogue">打开对话与记忆设置</button><div class="hint">配置模型 API、自动记忆和系统语音。</div><div class="row"><div><label>气泡锚点 X</label><input id="bubbleAnchorX" type="number" step="0.01" value="${safe(config?.dialogue?.bubbleAnchorX ?? 0.56)}"></div><div><label>气泡锚点 Y</label><input id="bubbleAnchorY" type="number" step="0.01" value="${safe(config?.dialogue?.bubbleAnchorY ?? 0.34)}"></div></div><label><input id="bubbleAutoClose" type="checkbox">气泡自动关闭</label><label>每字符停留时间（毫秒）<input id="bubblePerCharMs" type="number" min="10" value="${safe(config?.dialogue?.bubblePerCharMs ?? 180)}"></label><label>每行字符数<input id="charsPerLine" type="number" min="5" value="${safe(config?.dialogue?.charsPerLine ?? 15)}"></label></div>
   <div id="general" class="panel"><label><input id="autoLaunch" type="checkbox"> 开机自启动</label><label><input id="showPetBounds" type="checkbox"> 显示角色容器边界（调试）</label></div>
@@ -585,6 +588,7 @@ function openPreferencesWindow() {
     document.getElementById('autoLaunch').checked = !!cfg.autoLaunch;
     document.getElementById('showPetBounds').checked = !!cfg.showPetBounds;
     document.getElementById('bubbleAutoClose').checked = (cfg?.dialogue?.bubbleAutoClose ?? true) !== false;
+    document.getElementById('bubbleMode').value = cfg?.dialogue?.bubbleMode === 'replace' ? 'replace' : 'stack';
     document.querySelectorAll('.tab').forEach(btn=>btn.addEventListener('click',()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));btn.classList.add('active');document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));document.getElementById(btn.dataset.panel).classList.add('active');}));
     document.getElementById('openDialogue').addEventListener('click',()=>ipcRenderer.invoke('gateway-open'));
     document.getElementById('cancelBtn').addEventListener('click',()=>window.close());
@@ -606,6 +610,7 @@ function openPreferencesWindow() {
           large: Number(document.getElementById('scLarge').value) || 1
         },
         dialogue: {
+          bubbleMode: document.getElementById('bubbleMode').value,
           bubbleAnchorX: Number(document.getElementById('bubbleAnchorX').value),
           bubbleAnchorY: Number(document.getElementById('bubbleAnchorY').value),
           bubbleAutoClose: document.getElementById('bubbleAutoClose').checked,
@@ -807,6 +812,7 @@ ipcMain.handle('pet-save-preferences', async (_event, payload) => {
       large: sanitize(payload?.sizeScaleOverrides?.large)
     },
     dialogue: {
+      bubbleMode: ['stack', 'replace'].includes(payload?.dialogue?.bubbleMode) ? payload.dialogue.bubbleMode : (current?.dialogue?.bubbleMode || 'stack'),
       bubbleAnchorX: Number.isFinite(Number(payload?.dialogue?.bubbleAnchorX)) ? Number(payload.dialogue.bubbleAnchorX) : (current?.dialogue?.bubbleAnchorX ?? defaultConfig.dialogue.bubbleAnchorX),
       bubbleAnchorY: Number.isFinite(Number(payload?.dialogue?.bubbleAnchorY)) ? Number(payload.dialogue.bubbleAnchorY) : (current?.dialogue?.bubbleAnchorY ?? defaultConfig.dialogue.bubbleAnchorY),
       bubbleAutoClose: typeof payload?.dialogue?.bubbleAutoClose === 'boolean' ? payload.dialogue.bubbleAutoClose : (current?.dialogue?.bubbleAutoClose ?? true),
@@ -817,6 +823,7 @@ ipcMain.handle('pet-save-preferences', async (_event, payload) => {
 
   saveConfig(next);
   applyAutoLaunch(next.autoLaunch);
+  speechWindow?.webContents.send('speech-settings', next.dialogue);
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('pet-behavior-style-changed', next.behaviorStyle);
@@ -946,6 +953,8 @@ ipcMain.on('speech-set-text', (event, payload) => {
   const [roleWidth] = mainWindow.getSize();
   const area = screen.getDisplayMatching(mainWindow.getBounds()).workArea;
   speechWindow.webContents.send('speech-set-text', { text, closable, roleWidth,
+    messageId: String(payload?.messageId || 'legacy').slice(0, 160), transient: !!payload?.transient,
+    bubbleMode: loadConfig()?.dialogue?.bubbleMode === 'replace' ? 'replace' : 'stack',
     charsPerLine: payload?.charsPerLine, maxWidth: Math.max(160, area.width - 36), maxHeight: Math.max(80, area.height - 36) });
   speechWindow.setAlwaysOnTop(true, 'screen-saver');
   if (!isPaused) speechWindow.showInactive();

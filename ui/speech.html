@@ -9,11 +9,16 @@
   <link rel="stylesheet" href="markdown.css">
 </head>
 <body>
-  <div id="bubble" hidden><div id="text" class="markdown-content" role="status"></div></div>
+  <div id="bubble-stack" hidden>
+    <div class="stack-layer layer-back" aria-hidden="true"></div>
+    <div class="stack-layer layer-near" aria-hidden="true"></div>
+    <div id="bubble"><div id="text" class="markdown-content" role="status"></div></div>
+  </div>
   <script src="../node_modules/markdown-it/dist/markdown-it.min.js"></script>
   <script src="../node_modules/katex/dist/katex.min.js"></script>
   <script src="../node_modules/markdown-it-texmath/texmath.js"></script>
   <script src="markdown.js"></script>
+  <script src="speech-messages.js"></script>
   <script src="speech.js"></script>
 </body>
 </html>

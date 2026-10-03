@@ -8,6 +8,8 @@ let petWidth = 132;
 let petHeight = 172;
 let activeRequestId = null;
 let latestText = '';
+let currentResponseIndex = 0;
+let speechMessageId = '';
 let bubbleTimer = null;
 let dialogueSettings = { bubbleAutoClose: true, bubblePerCharMs: 180, charsPerLine: 15 };
 
@@ -34,6 +36,8 @@ function setSpeech(text, closable) {
   window.desktopPet?.setSpeechText?.({
     text: formatSpeechText(text),
     closable,
+    messageId: speechMessageId,
+    transient: !latestText && !closable,
     charsPerLine: Math.max(5, Number(dialogueSettings.charsPerLine) || 15)
   });
 }
@@ -53,6 +57,8 @@ async function submitPrompt() {
   window.desktopPet?.cancelChat?.();
   activeRequestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   latestText = '';
+  currentResponseIndex = 0;
+  speechMessageId = `${activeRequestId}:0`;
   if (bubbleTimer) { clearTimeout(bubbleTimer); bubbleTimer = null; }
   input.value = '';
   resizeChatWindow();
@@ -77,13 +83,24 @@ window.desktopPet?.onChatWindowAnchor?.(anchor => {
 window.desktopPet?.onChatStream?.(payload => {
   if (!payload || payload.requestId !== activeRequestId) return;
   if (payload.type === 'chunk') {
+    const index = Number.isInteger(payload.responseIndex) ? payload.responseIndex : currentResponseIndex;
+    if (index !== currentResponseIndex) {
+      currentResponseIndex = index;
+      latestText = '';
+      speechMessageId = `${activeRequestId}:${index}`;
+    }
     latestText += payload.text || '';
     setSpeech(latestText || '...', false);
   } else if (payload.type === 'tool' && payload.status === 'running') {
     const labels = { get_weather: '查询天气中…', search_web: '搜索网页中…', get_current_time: '查看时间中…', run_command: '本地诊断中…', set_pet_action: '回应中…' };
     setSpeech(latestText || labels[payload.name] || '处理工具请求中…', false);
   } else if (['done', 'error', 'cancelled'].includes(payload.type)) {
-    const result = payload.type === 'done' ? (payload.text || latestText) :
+    if (payload.type === 'done' && typeof payload.responseText === 'string' && payload.responseText.trim()) {
+      currentResponseIndex = payload.responseIndex;
+      speechMessageId = `${activeRequestId}:${currentResponseIndex}`;
+      latestText = payload.responseText;
+    }
+    const result = payload.type === 'done' ? (latestText || payload.responseText || payload.text) :
       payload.type === 'cancelled' ? (latestText || '已停止回复。') :
         `${payload.error || '对话失败。'}${latestText ? `\n\n${latestText}` : ''}`;
     const note = payload.truncated ? '\n\n（回复达到输出上限，可让白子继续。）' : '';

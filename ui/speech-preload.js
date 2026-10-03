@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('speechOverlay', {
   onText: callback => subscribe('speech-set-text', callback),
   onPlacement: callback => subscribe('speech-placement', callback),
   onHide: callback => subscribe('speech-hide', callback),
+  onSettings: callback => subscribe('speech-settings', callback),
   resize: (width, height) => ipcRenderer.send('speech-window-resize', { width, height }),
   hide: () => ipcRenderer.send('speech-hide'),
   openLink: url => ipcRenderer.invoke('dialogue-open-link', url)

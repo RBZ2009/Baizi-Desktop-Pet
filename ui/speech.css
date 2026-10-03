@@ -1,10 +1,32 @@
-/* Responsibility: Style the independent reply overlay with one readable glass surface.
- * Implementation: 1. Reserve space for shadows and a directional pointer. 2. Scroll long text. 3. Match the glass composer.
+/* Responsibility: Style the independent glass reply and its blank notification backplates.
+ * Implementation: 1. Center the adaptive top bubble. 2. Give hidden messages uniform sizes.
+ * 3. Reserve stack edges inside the measured overlay and preserve text scrolling.
  */
 html, body { margin: 0; background: transparent; overflow: hidden; }
 body { padding: 10px; box-sizing: border-box; }
+#bubble-stack { position: relative; padding-bottom: var(--stack-space, 0px); isolation: isolate; }
+[hidden] { display: none !important; }
+.stack-layer {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: var(--layer-width, 216px);
+  height: 44px;
+  box-sizing: border-box;
+  border-radius: 14px;
+  background: rgba(225, 237, 247, .95);
+  border: 1px solid rgba(255, 255, 255, .92);
+  box-shadow: 0 3px 8px rgba(28, 45, 63, .12), inset 0 1px rgba(255, 255, 255, .9);
+  pointer-events: none;
+  display: none;
+}
+.layer-near { bottom: calc(var(--stack-space, 0px) - 9px); z-index: 1; }
+.layer-back { bottom: 0; z-index: 0; background: rgba(217, 231, 243, .95); }
+#bubble-stack[data-depth="1"] .layer-near, #bubble-stack[data-depth="2"] .stack-layer { display: block; }
 #bubble {
   position: relative;
+  z-index: 2;
+  margin: 0 auto;
   box-sizing: border-box;
   padding: 10px 12px;
   border-radius: 14px;

@@ -51,8 +51,17 @@ class ChatService {
         let result;
         let executedCalls = 0;
         let actionUsed = false;
-        const onDelta = delta => { text += delta; send({ type: 'chunk', text: delta }); };
+        let responseIndex = 0;
         for (let round = 0; round < 4; round += 1) {
+          responseIndex = round;
+          let responseStarted = false;
+          // Preserve complete history, but identify each provider response separately for the overlay.
+          const onDelta = delta => {
+            if (!responseStarted && text) text += '\n\n';
+            responseStarted = true;
+            text += delta;
+            send({ type: 'chunk', text: delta, responseIndex });
+          };
           // The last model pass must finish in text, rather than launch another tool cycle.
           const activeTools = round < 3 && executedCalls < 6 ? tools : [];
           const wantsTools = activeTools.length > 0;
@@ -103,7 +112,7 @@ class ChatService {
           try { this.storage.enqueueMemory(turn.userId); this.memory.kick(); }
           catch (error) { memoryError = error.message; }
         }
-        send({ type: 'done', text, usage: result.usage, truncated: result.finishReason === 'length', memoryError });
+        send({ type: 'done', text, responseText: result.text, responseIndex, usage: result.usage, truncated: result.finishReason === 'length', memoryError });
       } catch (error) {
         this.storage.finishTurn(turn, text, signal.aborted ? 'interrupted' : 'failed', error.message);
         throw error;
