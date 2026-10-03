@@ -8,6 +8,7 @@ const path = require('node:path');
 const { randomBytes } = require('node:crypto');
 const { normalizeSettings, publicSettings } = require('./gateway/settings');
 const { readSse } = require('./gateway/provider');
+const { HttpVoiceProvider } = require('./gateway/voice/http-provider');
 
 class GatewayManager {
   // Keep local files outside the install directory and preserve legacy history for migration.
@@ -21,12 +22,19 @@ class GatewayManager {
     this.port = null;
     this.token = randomBytes(32).toString('hex');
     this.settings = normalizeSettings();
+    this.voiceControllers = new Map();
     this.settingsError = '';
     if (fs.existsSync(this.settingsPath)) {
       try {
         const saved = JSON.parse(fs.readFileSync(this.settingsPath, 'utf8'));
         saved.apiKey = saved.encryptedApiKey ? safeStorage.decryptString(Buffer.from(saved.encryptedApiKey, 'base64')) : '';
+        saved.voiceApiKey = saved.encryptedVoiceApiKey ? safeStorage.decryptString(Buffer.from(saved.encryptedVoiceApiKey, 'base64')) : (saved.voiceApiKey || '');
+        saved.voiceTranscriptionApiKey = saved.encryptedVoiceTranscriptionApiKey ? safeStorage.decryptString(Buffer.from(saved.encryptedVoiceTranscriptionApiKey, 'base64')) : (saved.voiceTranscriptionApiKey || '');
+        saved.voiceSynthesisApiKey = saved.encryptedVoiceSynthesisApiKey ? safeStorage.decryptString(Buffer.from(saved.encryptedVoiceSynthesisApiKey, 'base64')) : (saved.voiceSynthesisApiKey || '');
         delete saved.encryptedApiKey;
+        delete saved.encryptedVoiceApiKey;
+        delete saved.encryptedVoiceTranscriptionApiKey;
+        delete saved.encryptedVoiceSynthesisApiKey;
         this.settings = normalizeSettings(saved);
       } catch { this.settingsError = '无法读取已有模型设置或解密凭据，请重新保存设置。'; }
     }
@@ -37,12 +45,21 @@ class GatewayManager {
 
   // Preserve a blank key input; clearing it requires an explicit action.
   async saveSettings(input) {
-    const { clearApiKey, hasApiKey, settingsError, ...values } = input;
-    const next = normalizeSettings({ ...this.settings, ...values, apiKey: clearApiKey ? '' : (values.apiKey || this.settings.apiKey) });
-    const { apiKey, ...saved } = next;
+    const { clearApiKey, clearVoiceApiKey, clearVoiceTranscriptionApiKey, clearVoiceSynthesisApiKey, hasApiKey, hasVoiceApiKey, settingsError, ...values } = input;
+    const next = normalizeSettings({ ...this.settings, ...values,
+      apiKey: clearApiKey ? '' : (values.apiKey || this.settings.apiKey),
+      voiceApiKey: clearVoiceApiKey ? '' : (values.voiceApiKey || this.settings.voiceApiKey),
+      voiceTranscriptionApiKey: clearVoiceTranscriptionApiKey ? '' : (values.voiceTranscriptionApiKey || this.settings.voiceTranscriptionApiKey),
+      voiceSynthesisApiKey: clearVoiceSynthesisApiKey ? '' : (values.voiceSynthesisApiKey || this.settings.voiceSynthesisApiKey) });
+    const { apiKey, voiceApiKey, voiceTranscriptionApiKey, voiceSynthesisApiKey, ...saved } = next;
     if (apiKey) {
       if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，未保存 API Key。');
       saved.encryptedApiKey = safeStorage.encryptString(apiKey).toString('base64');
+    }
+    for (const [key, value] of Object.entries({ VoiceApiKey: voiceApiKey, VoiceTranscriptionApiKey: voiceTranscriptionApiKey, VoiceSynthesisApiKey: voiceSynthesisApiKey })) {
+      if (!value) continue;
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，未保存语音 API Key。');
+      saved[`encrypted${key}`] = safeStorage.encryptString(value).toString('base64');
     }
     const temporary = `${this.settingsPath}.tmp`;
     fs.writeFileSync(temporary, JSON.stringify(saved, null, 2), { mode: 0o600 });
@@ -51,6 +68,42 @@ class GatewayManager {
     this.settingsError = '';
     if (this.port || this.starting) await this.request('/configure', next);
     return this.getSettings();
+  }
+
+  // Transcribe one in-memory microphone recording without persisting or logging its contents.
+  async transcribeAudio(audio, mimeType = 'audio/webm') {
+    const voice = { ...this.settings.voice };
+    if (!voice.inputEnabled) throw new Error('麦克风输入已关闭。');
+    const contentType = String(mimeType).split(';')[0].trim();
+    if (!voice.transcriptionEndpoint || !voice.transcriptionModel) throw new Error('请先在设置中配置转写地址和模型。');
+    const provider = new HttpVoiceProvider({ settings: voice,
+      transcriptionApiKey: this.settings.voiceTranscriptionApiKey || this.settings.voiceApiKey,
+      synthesisApiKey: this.settings.voiceSynthesisApiKey || this.settings.voiceApiKey });
+    return provider.transcribe(new Blob([audio], { type: contentType }), { signal: AbortSignal.timeout(60000) });
+  }
+
+  // Synthesize a response under a request-owned abort controller and publish only after completion.
+  async synthesizeSpeech(requestId, text, signal) {
+    this.cancelSpeech(requestId);
+    const controller = new AbortController();
+    this.voiceControllers.set(requestId, controller);
+    try {
+      const provider = new HttpVoiceProvider({ settings: this.settings.voice,
+        synthesisApiKey: this.settings.voiceSynthesisApiKey || this.settings.voiceApiKey });
+      const result = await provider.synthesize(text, { signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal });
+      return result;
+    } finally {
+      if (this.voiceControllers.get(requestId) === controller) this.voiceControllers.delete(requestId);
+    }
+  }
+
+  // Cancel a pending request or active synthesis without affecting another reply.
+  cancelSpeech(requestId) {
+    const controller = this.voiceControllers.get(requestId);
+    if (!controller) return false;
+    controller.abort();
+    this.voiceControllers.delete(requestId);
+    return true;
   }
 
   // Recreate crashed gateways and fail a bounded startup instead of hanging the UI.
@@ -108,6 +161,6 @@ class GatewayManager {
   }
 
   // Stop the owned child on application exit.
-  stop() { this.child?.kill(); this.port = null; this.child = null; }
+  stop() { for (const controller of this.voiceControllers.values()) controller.abort(); this.voiceControllers.clear(); this.child?.kill(); this.port = null; this.child = null; }
 }
 module.exports = { GatewayManager };

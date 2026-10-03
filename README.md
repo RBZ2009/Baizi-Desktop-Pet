@@ -1,6 +1,6 @@
 # 白子桌宠
 
-透明置顶的 Electron / VRM 桌宠，保留拖动、点击反应、随机动作和表情。对话通过本地 gateway 调用兼容 Chat Completions 的大模型 API；聊天、会话摘要和长期记忆保存在本机 SQLite。
+透明置顶的 Electron / VRM 桌宠，支持拖动、点击反应、随机动作和对话姿态。对话通过本地 gateway 调用兼容 Chat Completions 的大模型 API；聊天、会话摘要和长期记忆保存在本机 SQLite。
 
 ## 开始使用
 
@@ -70,7 +70,9 @@ xattr -d com.apple.quarantine *.command
 
 命令工具默认关闭，开启后仅允许 `pwd`、`date`、`whoami`、`uname`、`ls`、`git status`、`git log --oneline -5`。源码运行时工作目录为项目根目录，打包运行时为应用数据目录。它不执行任意 shell、项目脚本或 `npm test`，也不读取文件正文；命令结果会发送给模型。
 
-模型可通过动作工具选择挥手、跳跃、跳舞、坐下和新增的点头、摇头、鞠躬、思考姿态。选择规则位于 `gateway/skills/pet-actions/SKILL.md`，由网关加载。动作在有限时长后恢复待机，用户拖动或暂停时用户交互优先。新增姿态由现有 VRM 骨骼生成，无需下载动作资源。
+模型可通过动作工具选择挥手、跳跃、跳舞，以及倾听、解释、安慰、鼓劲、得意、惊讶、抗议、探头、困倦和鼓掌等姿态。选择规则位于 `gateway/skills/pet-actions/SKILL.md`，由网关加载。工具动作结束后恢复当前对话姿态或待机，用户手动动作、拖动和暂停优先。
+
+打开聊天框会自动倾听，提交后进入思考，回答或播报时做轻量解释。挥手、倾听和解释自动交替变体。按 `A/S/F/G/H/J` 可预览六个新增情绪动作。动作与测试说明见 [`docs/ANIMATION.md`](docs/ANIMATION.md)。当前模型的面部烘焙在贴图中，尚无可见的眨眼或口型变化。
 
 ## 本地数据和凭据
 
@@ -88,6 +90,7 @@ gateway 使用 Electron 独立进程，仅监听 `127.0.0.1` 的随机端口，�
 ```bash
 npm test                  # 本机模拟 API、SQLite、上下文和记忆测试
 npm run test:electron     # 隔离用户数据的真实 Electron 界面集成测试
+npm run test:animation    # 真实 VRM 动作、对话联动与三种窗口尺寸检查
 npm run pack:mac          # 生成 dist/mac-arm64/白子桌宠.app
 npm run dist:mac          # 生成应用和 DMG
 ```
@@ -98,6 +101,8 @@ npm run dist:mac          # 生成应用和 DMG
 
 ```text
 main.js / preload.js / renderer.js  桌宠窗口、交互与受控 IPC
+ pet-animation.mjs                 标准骨骼动作、变体、平滑过渡
+ pet-dialogue.mjs / dialogue-state.js  对话状态、请求隔离与动作优先级
  gateway-manager.js                gateway 生命周期和加密设置
  speech-service.js                 macOS 播报队列
  gateway/
@@ -122,6 +127,10 @@ main.js / preload.js / renderer.js  桌宠窗口、交互与受控 IPC
 ```
 
 3D 模型放在 `assets/model.vrm`，缺失时回退到 `assets/pet.png`。页面实际引用的 `vendor/three/` 随源码和应用一起保留。
+
+人物动作由 `pet-animation.mjs` 统一控制，已按当前角色比例重做挥手、两套舞蹈及其他姿态，并加入平滑切换、脚底落地和完整复位。原 VRMA 资源保留但不再自动播放。按 `2`／`5`／`6` 可体验挥手和两套舞蹈；运行 `npm run test:animation` 检查真实窗口中的动作。检查结果和设计说明见 [`docs/ANIMATION.md`](docs/ANIMATION.md)。
+
+对话模型还可选择倾听、解释、疑惑、想到办法、害羞、安慰、鼓劲和伸懒腰八个动作；例如“安慰我一下”“给我打打气”。可在桌宠窗口按 `Q/W/E/R/T/Y/U/I` 依次直接体验，输入文字时不会触发。
 
 ## 验收建议
 

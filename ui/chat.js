@@ -4,6 +4,8 @@
  */
 const panel = document.getElementById('chat-panel');
 const input = document.getElementById('chat-input');
+const voiceButton = document.getElementById('voice-button');
+const voicePlayer = document.getElementById('voice-player');
 let petWidth = 132;
 let petHeight = 172;
 let activeRequestId = null;
@@ -12,6 +14,16 @@ let currentResponseIndex = 0;
 let speechMessageId = '';
 let bubbleTimer = null;
 let dialogueSettings = { bubbleAutoClose: true, bubblePerCharMs: 180, charsPerLine: 15 };
+let voiceObjectUrl = '';
+let lastCompletedRequestId = null;
+
+const voiceInput = typeof VoiceInput === 'function' ? new VoiceInput({
+  onState: state => voiceButton?.classList.toggle('recording', state === 'recording'),
+  onText: text => { input.value = `${input.value}${input.value ? ' ' : ''}${text}`; resizeChatWindow(); input.focus(); },
+  onError: error => setSpeech(`麦克风输入失败：${error.message}`, true)
+}) : null;
+
+window.desktopPet?.onVoiceStop?.(() => voiceInput?.stop());
 
 function resizeChatWindow() {
   const canvas = document.createElement('canvas');
@@ -56,6 +68,7 @@ async function submitPrompt() {
   if (!text) return;
   window.desktopPet?.cancelChat?.();
   activeRequestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  lastCompletedRequestId = null;
   latestText = '';
   currentResponseIndex = 0;
   speechMessageId = `${activeRequestId}:0`;
@@ -105,6 +118,7 @@ window.desktopPet?.onChatStream?.(payload => {
         `${payload.error || '对话失败。'}${latestText ? `\n\n${latestText}` : ''}`;
     const note = payload.truncated ? '\n\n（回复达到输出上限，可让白子继续。）' : '';
     showFinalSpeech((result || '没有收到可读回复。') + note, 12000);
+    lastCompletedRequestId = activeRequestId;
     activeRequestId = null;
   }
 });
@@ -113,6 +127,22 @@ window.desktopPet?.onSpeechStatus?.(status => {
   if (status.requestId === activeRequestId && status.type === 'error') {
     showFinalSpeech(`${latestText || '语音提示'}\n\n${status.error}`, 12000);
   }
+});
+
+window.desktopPet?.onVoiceAudio?.(payload => {
+  if (!payload || ![activeRequestId, lastCompletedRequestId].includes(payload.requestId) || !payload.audioBase64) return;
+  if (voiceObjectUrl) URL.revokeObjectURL(voiceObjectUrl);
+  const bytes = Uint8Array.from(atob(payload.audioBase64), character => character.charCodeAt(0));
+  voiceObjectUrl = URL.createObjectURL(new Blob([bytes], { type: payload.mimeType || 'audio/mpeg' }));
+  voicePlayer.src = voiceObjectUrl;
+  voicePlayer.play().catch(() => {});
+});
+
+if (voiceButton && typeof voiceButton.addEventListener === 'function') voiceButton.addEventListener('click', async () => {
+  try {
+    if (voiceInput?.recorder) voiceInput.stop();
+    else await voiceInput?.start();
+  } catch (error) { setSpeech(`麦克风不可用：${error.message}`, true); }
 });
 
 window.desktopPet?.onChatPanelVisibility?.(visible => {
@@ -127,7 +157,10 @@ input.addEventListener('keydown', event => {
     submitPrompt();
   }
   if (event.key === 'Escape') {
-    if (activeRequestId) window.desktopPet?.cancelChat?.();
+    // Text may have finished while system speech is still playing.
+    window.desktopPet?.cancelChat?.();
+    window.desktopPet?.cancelVoiceSpeech?.(activeRequestId);
+    voicePlayer?.pause?.();
     window.desktopPet?.setChatPanelVisible?.(false);
   }
 });

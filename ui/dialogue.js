@@ -15,6 +15,23 @@ async function loadSettings() {
   for (const key of fields) document.getElementById(key).value = settings[key];
   document.getElementById('timeoutSeconds').value = settings.requestTimeoutMs / 1000;
   for (const key of ['autoMemory', 'toolsEnabled', 'commandToolsEnabled', 'ttsEnabled', 'profileEnabled', 'profileProactiveQuestions']) document.getElementById(key).checked = settings[key];
+  const voice = settings.voice || {};
+  document.getElementById('voiceProvider').value = voice.provider || 'none';
+  document.getElementById('voiceInputEnabled').checked = !!voice.inputEnabled;
+  document.getElementById('voiceOutputEnabled').checked = !!voice.outputEnabled;
+  document.getElementById('voiceTranscriptionEndpoint').value = voice.transcriptionEndpoint || voice.endpoint || '';
+  document.getElementById('voiceSynthesisEndpoint').value = voice.synthesisEndpoint || voice.endpoint || '';
+  document.getElementById('voiceTranscriptionModel').value = voice.transcriptionModel || '';
+  document.getElementById('voiceSynthesisModel').value = voice.synthesisModel || '';
+  document.getElementById('voiceName').value = voice.voice || '';
+  document.getElementById('voiceLanguage').value = voice.language ?? 'zh';
+  document.getElementById('voiceSpeed').value = voice.speed ?? 1;
+  document.getElementById('voiceInstructions').value = voice.instructions || '';
+  document.getElementById('voiceMaxRecordingSeconds').value = voice.maxRecordingSeconds ?? 60;
+  document.getElementById('voiceAutoSend').checked = !!voice.autoSend;
+  document.getElementById('voiceApiKey').placeholder = settings.hasVoiceApiKey ? '已保存 Key；留空保留' : '请输入语音 API Key';
+  document.getElementById('voiceTranscriptionApiKey').placeholder = settings.hasVoiceTranscriptionApiKey ? '已保存独立 Key；留空保留' : '可选，覆盖通用 Key';
+  document.getElementById('voiceSynthesisApiKey').placeholder = settings.hasVoiceSynthesisApiKey ? '已保存独立 Key；留空保留' : '可选，覆盖通用 Key';
   document.getElementById('apiKey').placeholder = settings.hasApiKey ? '已保存 Key；留空保留' : '请输入 API Key';
   if (settings.settingsError) showNotice(settings.settingsError);
 }
@@ -25,11 +42,38 @@ document.getElementById('settings-form').addEventListener('submit', async event 
   try {
     const settings = Object.fromEntries(fields.map(key => [key, document.getElementById(key).value]));
     for (const key of ['autoMemory', 'toolsEnabled', 'commandToolsEnabled', 'ttsEnabled', 'profileEnabled', 'profileProactiveQuestions', 'clearApiKey']) settings[key] = document.getElementById(key).checked;
+    settings.voice = {
+      provider: document.getElementById('voiceProvider').value,
+      inputEnabled: document.getElementById('voiceInputEnabled').checked,
+      outputEnabled: document.getElementById('voiceOutputEnabled').checked,
+      transcriptionEndpoint: document.getElementById('voiceTranscriptionEndpoint').value,
+      synthesisEndpoint: document.getElementById('voiceSynthesisEndpoint').value,
+      transcriptionModel: document.getElementById('voiceTranscriptionModel').value,
+      synthesisModel: document.getElementById('voiceSynthesisModel').value,
+      voice: document.getElementById('voiceName').value,
+      language: document.getElementById('voiceLanguage').value,
+      speed: Number(document.getElementById('voiceSpeed').value),
+      instructions: document.getElementById('voiceInstructions').value,
+      maxRecordingSeconds: Number(document.getElementById('voiceMaxRecordingSeconds').value),
+      autoSend: document.getElementById('voiceAutoSend').checked
+    };
+    settings.voiceApiKey = document.getElementById('voiceApiKey').value;
+    settings.voiceTranscriptionApiKey = document.getElementById('voiceTranscriptionApiKey').value;
+    settings.voiceSynthesisApiKey = document.getElementById('voiceSynthesisApiKey').value;
+    settings.clearVoiceApiKey = document.getElementById('clearVoiceApiKey').checked;
+    settings.clearVoiceTranscriptionApiKey = document.getElementById('clearVoiceTranscriptionApiKey').checked;
+    settings.clearVoiceSynthesisApiKey = document.getElementById('clearVoiceSynthesisApiKey').checked;
     settings.apiKey = document.getElementById('apiKey').value;
     settings.requestTimeoutMs = Number(document.getElementById('timeoutSeconds').value) * 1000;
     await api.saveSettings(settings);
     document.getElementById('apiKey').value = '';
     document.getElementById('clearApiKey').checked = false;
+    document.getElementById('voiceApiKey').value = '';
+    document.getElementById('voiceTranscriptionApiKey').value = '';
+    document.getElementById('voiceSynthesisApiKey').value = '';
+    document.getElementById('clearVoiceApiKey').checked = false;
+    document.getElementById('clearVoiceTranscriptionApiKey').checked = false;
+    document.getElementById('clearVoiceSynthesisApiKey').checked = false;
     await loadSettings();
     showNotice('设置已保存。');
   } catch (error) { showNotice(error.message); }

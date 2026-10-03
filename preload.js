@@ -49,6 +49,26 @@ contextBridge.exposeInMainWorld('desktopPet', {
   },
   getSizeScaleOverrides: () => ipcRenderer.invoke('pet-get-size-scale-overrides'),
   cancelChat: () => ipcRenderer.send('pet-chat-cancel'),
+  submitVoiceText: text => ipcRenderer.send('pet-chat-submit-text', String(text || '').slice(0, 12000)),
+  transcribeVoice: (audioBase64, mimeType) => ipcRenderer.invoke('voice-transcribe', { audioBase64, mimeType }),
+  getVoiceSettings: () => ipcRenderer.invoke('voice-settings-get'),
+  onVoiceStop: callback => {
+    const handler = () => callback();
+    ipcRenderer.on('pet-voice-stop', handler);
+    return () => ipcRenderer.removeListener('pet-voice-stop', handler);
+  },
+  synthesizeVoice: (requestId, text) => ipcRenderer.invoke('voice-synthesize', { requestId, text }),
+  cancelVoiceSpeech: requestId => ipcRenderer.send('voice-speech-cancel', requestId),
+  onVoiceAudio: callback => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('pet-voice-audio', handler);
+    return () => ipcRenderer.removeListener('pet-voice-audio', handler);
+  },
+  onVoiceError: callback => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('pet-voice-error', handler);
+    return () => ipcRenderer.removeListener('pet-voice-error', handler);
+  },
   openDialogueSettings: () => ipcRenderer.invoke('gateway-open'),
   onSpeechStatus: callback => {
     const handler = (_event, payload) => callback(payload);
@@ -65,6 +85,12 @@ contextBridge.exposeInMainWorld('desktopPet', {
     const handler = (_event, action) => callback(action);
     ipcRenderer.on('pet-action-request', handler);
     return () => ipcRenderer.removeListener('pet-action-request', handler);
+  },
+  // Forward only request metadata and state; chat contents stay in the conversation window.
+  onDialogueState: callback => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('pet-dialogue-state', handler);
+    return () => ipcRenderer.removeListener('pet-dialogue-state', handler);
   },
   setSpeechText: (text) => ipcRenderer.send('speech-set-text', text),
   hideSpeech: () => ipcRenderer.send('speech-hide'),

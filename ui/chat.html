@@ -44,11 +44,15 @@
         transition: height 120ms ease-out;
       }
       #chat-input::placeholder { color: rgba(35, 53, 67, 0.58); }
+      #voice-button { position: absolute; right: 6px; bottom: 6px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; color: rgba(28,43,55,.86); background: rgba(255,255,255,.42); font: 11px sans-serif; cursor: pointer; }
+      #voice-button.recording { color: #fff; background: rgba(175, 53, 68, .8); }
       @media (prefers-reduced-motion: reduce) { #chat-panel, #chat-input { transition-duration: 1ms; } }
     </style>
   </head>
   <body>
-    <div id="chat-panel"><textarea id="chat-input" rows="1" maxlength="12000" placeholder="和我说点什么…"></textarea></div>
+    <div id="chat-panel"><textarea id="chat-input" rows="1" maxlength="12000" placeholder="和我说点什么…"></textarea><button id="voice-button" type="button" aria-label="录音输入">麦</button></div>
+    <audio id="voice-player" preload="auto"></audio>
+    <script src="./voice-input.js"></script>
     <script src="./chat.js"></script>
   </body>
 </html>

@@ -25,6 +25,20 @@
 <p class="hint">天气使用 Open-Meteo，搜索使用 DuckDuckGo；查询内容会发送给对应服务。命令诊断仅允许固定命令，结果会发送给模型。命令默认关闭，不读取文件正文、不执行项目脚本。</p>
 <label class="check"><input id="ttsEnabled" type="checkbox">使用 macOS 系统语音播报回复</label>
 <div class="grid"><label>系统声音<input id="ttsVoice" placeholder="Tingting"></label><label>语速（每分钟字数）<input id="ttsRate" type="number" min="80" max="400" required></label></div>
+<h2>麦克风与 API 配音</h2>
+<label>配音方式<select id="voiceProvider"><option value="none">沿用系统语音开关</option><option value="custom">可配置 HTTP 合成</option><option value="system">系统语音输出</option></select></label>
+<label class="check"><input id="voiceInputEnabled" type="checkbox">允许麦克风录音输入</label>
+<label class="check"><input id="voiceOutputEnabled" type="checkbox">启用所选配音方式</label>
+<div class="grid"><label>转写地址<input id="voiceTranscriptionEndpoint" type="url" placeholder="https://…/audio/transcriptions"></label><label>合成地址<input id="voiceSynthesisEndpoint" type="url" placeholder="https://…/audio/speech"></label></div>
+<div class="grid"><label>转写模型<input id="voiceTranscriptionModel" placeholder="gpt-4o-transcribe"></label><label>合成模型<input id="voiceSynthesisModel" placeholder="gpt-4o-mini-tts"></label></div>
+<label>声音<input id="voiceName" placeholder="coral 或供应商声音名"></label>
+<div class="grid"><label>转写语言<input id="voiceLanguage" placeholder="zh，留空自动识别"></label><label>配音语速<input id="voiceSpeed" type="number" min="0.25" max="4" step="0.05"></label></div>
+<label>配音风格<textarea id="voiceInstructions" rows="3" maxlength="1500" placeholder="平静、清晰、简短的中文表达，温柔自然，有轻微停顿。"></textarea></label>
+<div class="grid"><label>最长录音（秒）<input id="voiceMaxRecordingSeconds" type="number" min="5" max="120"></label><label class="check"><input id="voiceAutoSend" type="checkbox">转写后直接发送</label></div>
+<div class="grid"><label>通用语音 API Key<input id="voiceApiKey" type="password" autocomplete="off" placeholder="留空保留已保存 Key"></label><label>转写 API Key<input id="voiceTranscriptionApiKey" type="password" autocomplete="off" placeholder="可选，覆盖通用 Key"></label></div>
+<label>合成 API Key<input id="voiceSynthesisApiKey" type="password" autocomplete="off" placeholder="可选，覆盖通用 Key"></label>
+<label class="check"><input id="clearVoiceApiKey" type="checkbox">清除通用语音 API Key</label><label class="check"><input id="clearVoiceTranscriptionApiKey" type="checkbox">清除转写 API Key</label><label class="check"><input id="clearVoiceSynthesisApiKey" type="checkbox">清除合成 API Key</label>
+<p class="hint">录音片段发送到配置的转写服务，不在本机保存。API 配音为 AI 生成声音；风格指令需要合成服务支持。</p>
 <p class="hint">API Key 使用系统安全存储加密。选入上下文的对话和记忆会发送给模型供应商。</p>
 <div class="actions"><button type="submit">保存设置</button><button id="test-model" type="button">测试模型连接</button></div>
 </form></section>

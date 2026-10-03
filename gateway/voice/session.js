@@ -97,6 +97,12 @@ class VoiceSession {
     return sessionId;
   }
 
+  // Start a configured realtime provider without coupling the session to its protocol.
+  connectConfigured(provider, settings = {}, options = {}) {
+    const providerName = String(settings.provider || 'custom').trim() || 'custom';
+    return this.connect(provider, { ...options, settings: { ...settings, provider: providerName } });
+  }
+
   // Forward generated text to whichever response owner is active.
   appendText(text) {
     if (!this.sessionId || this.state !== STATES.FALLBACK) return false;

@@ -82,6 +82,8 @@ function cancelDialogue() {
   dialogueState.cancel();
   activeDialogue?.controller.abort();
   voiceSession.cancel();
+  if (activeDialogue) gatewayManager?.cancelSpeech(activeDialogue.token.requestId);
+  if (chatWindow && !chatWindow.isDestroyed()) chatWindow.webContents.send('pet-voice-stop');
 }
 // Create the gateway manager after Electron is ready so safeStorage is available.
 function getGateway() {
@@ -879,6 +881,29 @@ function requireManagementSender(event) {
 ipcMain.handle('gateway-open', () => { getGateway().openWindow(); });
 ipcMain.handle('gateway-settings-get', event => { requireManagementSender(event); return getGateway().getSettings(); });
 ipcMain.handle('gateway-settings-save', (event, payload) => { requireManagementSender(event); return getGateway().saveSettings(payload); });
+// Expose speech preferences without keys to the composer before it requests microphone access.
+ipcMain.handle('voice-settings-get', event => {
+  if (event.sender !== mainWindow?.webContents && event.sender !== chatWindow?.webContents) throw new Error('不允许此页面使用语音。');
+  return getGateway().getSettings().voice;
+});
+ipcMain.handle('voice-transcribe', async (event, payload = {}) => {
+  if (event.sender !== mainWindow?.webContents && event.sender !== chatWindow?.webContents) throw new Error('不允许此页面使用麦克风。');
+  const audio = Buffer.from(String(payload.audioBase64 || ''), 'base64');
+  if (!audio.length || audio.length > 15 * 1024 * 1024) throw new Error('录音大小无效。');
+  return { text: await getGateway().transcribeAudio(audio, String(payload.mimeType || 'audio/webm')) };
+});
+ipcMain.handle('voice-synthesize', async (event, payload = {}) => {
+  if (event.sender !== mainWindow?.webContents && event.sender !== chatWindow?.webContents) throw new Error('不允许此页面使用语音。');
+  const requestId = String(payload.requestId || '').slice(0, 100);
+  const text = String(payload.text || '').trim();
+  if (!requestId || !text || text.length > 12000) throw new Error('语音文本无效。');
+  const result = await getGateway().synthesizeSpeech(requestId, text);
+  return { ...result, audioBase64: Buffer.from(result.audio).toString('base64') };
+});
+ipcMain.on('voice-speech-cancel', (event, requestId) => {
+  if (event.sender !== mainWindow?.webContents && event.sender !== chatWindow?.webContents) return;
+  getGateway().cancelSpeech(String(requestId || ''));
+});
 ipcMain.handle('gateway-status', event => { requireManagementSender(event); return getGateway().request('/health'); });
 ipcMain.handle('gateway-manage', async (event, { action, payload } = {}) => {
   requireManagementSender(event);
@@ -910,16 +935,20 @@ ipcMain.on('pet-chat-query-stream', async (event, payload) => {
   if (event.sender !== mainWindow?.webContents && event.sender !== chatWindow?.webContents) return;
   const requestId = String(payload?.requestId || '').slice(0, 100);
   if (!requestId) return;
-  activeDialogue?.controller.abort();
-  const state = { sender: event.sender, controller: new AbortController(), token: dialogueState.begin(requestId) };
+  cancelDialogue();
+  const state = { sender: event.sender, controller: new AbortController(), token: dialogueState.begin(requestId), responseText: '' };
   activeDialogue = state;
   const send = data => {
     if (activeDialogue !== state) return;
     if (state.controller.signal.aborted && data.type !== 'cancelled') return;
-    if (data.type === 'chunk') voiceSession.appendText(data.text);
+    if (data.type === 'chunk') {
+      voiceSession.appendText(data.text);
+      state.responseText += data.text || '';
+    }
+    if (data.type === 'done' && data.responseText) state.responseText = data.responseText;
     if (data.type === 'done') voiceSession.finishText();
     if (data.type === 'error' || data.type === 'cancelled') voiceSession.cancel(data.type);
-    dialogueState.text(state.token, data.type, speechService.pending);
+    dialogueState.text(state.token, data.type, speechService.pending || state.apiVoice);
     if (data.type === 'tool' && data.name === 'set_pet_action' && data.status === 'complete') {
       try {
         const action = normalizeAction(data.result);
@@ -935,12 +964,26 @@ ipcMain.on('pet-chat-query-stream', async (event, payload) => {
   const disconnect = () => { if (activeDialogue === state) cancelDialogue(); };
   event.sender.once('destroyed', disconnect);
   try {
-    voiceSession.beginFallback(getGateway().getSettings(), status => {
+    const settings = getGateway().getSettings();
+    state.apiVoice = settings.voice?.provider === 'custom' && settings.voice.outputEnabled;
+    voiceSession.beginFallback({ ...settings, ttsEnabled: settings.voice?.provider === 'custom' ? false :
+      settings.voice?.provider === 'system' ? settings.voice.outputEnabled : settings.ttsEnabled }, status => {
       if (dialogueState.current !== state.token || state.token.closed) return;
       dialogueState.speech(state.token, status.type);
       if (!event.sender.isDestroyed()) event.sender.send('pet-speech-status', { requestId, ...status });
     });
     await getGateway().chat(String(payload?.prompt || ''), send, state.controller.signal);
+    if (activeDialogue === state && !state.controller.signal.aborted) {
+      if (state.apiVoice && state.responseText.trim()) {
+        try {
+          const result = await getGateway().synthesizeSpeech(requestId, state.responseText, state.controller.signal);
+          if (activeDialogue === state && !state.controller.signal.aborted && !event.sender.isDestroyed()) event.sender.send('pet-voice-audio', { requestId, mimeType: result.mimeType, audioBase64: Buffer.from(result.audio).toString('base64') });
+        } catch (error) {
+          dialogueState.speech(state.token, 'error');
+          if (!state.controller.signal.aborted && !event.sender.isDestroyed()) event.sender.send('pet-voice-error', { requestId, error: error.message });
+        }
+      }
+    }
   } catch (error) {
     send({ type: state.controller.signal.aborted ? 'cancelled' : 'error', error: error.message });
   } finally {
@@ -950,6 +993,11 @@ ipcMain.on('pet-chat-query-stream', async (event, payload) => {
     }
     if (activeDialogue === state) activeDialogue = null;
   }
+});
+
+ipcMain.on('pet-chat-submit-text', (event, text) => {
+  if (event.sender !== chatWindow?.webContents || !String(text || '').trim()) return;
+  event.sender.send('pet-chat-submit-text-result', { text: String(text).trim() });
 });
 
 ipcMain.on('speech-window-resize', (event, size) => {

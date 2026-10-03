@@ -2,13 +2,15 @@
  * Responsibility: Define and validate gateway configuration.
  * Implementation: 1. Normalize provider URLs. 2. Bound resource limits. 3. Keep secrets out of UI responses.
  */
+const { defaults: voiceDefaults, normalizeVoiceSettings } = require('./voice/settings');
 const defaults = {
   baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   model: 'qwen-plus', apiKey: '', temperature: 0.8,
   contextWindow: 32768, maxOutputTokens: 2048, requestTimeoutMs: 90000,
   autoMemory: true, memoryModel: '', toolsEnabled: true, commandToolsEnabled: false, ttsEnabled: false,
   ttsVoice: 'Tingting', ttsRate: 180, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-  profileEnabled: true, profileProactiveQuestions: true, profileQuestionCooldownHours: 168
+  profileEnabled: true, profileProactiveQuestions: true, profileQuestionCooldownHours: 168,
+  voiceApiKey: '', voiceTranscriptionApiKey: '', voiceSynthesisApiKey: '', voice: voiceDefaults
 };
 
 // Accept HTTPS providers and explicit loopback HTTP providers for local development.
@@ -34,6 +36,11 @@ function normalizeSettings(input = {}) {
   result.ttsEnabled = !!result.ttsEnabled;
   result.profileEnabled = result.profileEnabled !== false;
   result.profileProactiveQuestions = result.profileProactiveQuestions !== false;
+  for (const key of ['voiceApiKey', 'voiceTranscriptionApiKey', 'voiceSynthesisApiKey']) {
+    result[key] = String(result[key] || '').trim();
+    if (result[key].length > 4096 || /[\r\n]/.test(result[key])) throw new Error('语音 API Key 无效。');
+  }
+  result.voice = normalizeVoiceSettings(result.voice);
   const cooldown = Number(result.profileQuestionCooldownHours);
   if (!Number.isFinite(cooldown) || cooldown < 1 || cooldown > 8760) throw new Error('用户档案主动询问冷却时间必须在 1～8760 小时之间。');
   result.profileQuestionCooldownHours = Math.floor(cooldown);
@@ -45,7 +52,8 @@ function normalizeSettings(input = {}) {
 
 // Never return the stored API key to a renderer.
 function publicSettings(settings) {
-  const { apiKey, ...publicValue } = settings;
-  return { ...publicValue, hasApiKey: !!apiKey };
+  const { apiKey, voiceApiKey, voiceTranscriptionApiKey, voiceSynthesisApiKey, ...publicValue } = settings;
+  return { ...publicValue, voice: normalizeVoiceSettings(settings.voice), hasApiKey: !!apiKey,
+    hasVoiceApiKey: !!voiceApiKey, hasVoiceTranscriptionApiKey: !!voiceTranscriptionApiKey, hasVoiceSynthesisApiKey: !!voiceSynthesisApiKey };
 }
 module.exports = { defaults, normalizeSettings, publicSettings };
