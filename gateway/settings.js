@@ -7,7 +7,8 @@ const defaults = {
   model: 'qwen-plus', apiKey: '', temperature: 0.8,
   contextWindow: 32768, maxOutputTokens: 2048, requestTimeoutMs: 90000,
   autoMemory: true, memoryModel: '', toolsEnabled: true, commandToolsEnabled: false, ttsEnabled: false,
-  ttsVoice: 'Tingting', ttsRate: 180, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+  ttsVoice: 'Tingting', ttsRate: 180, timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  profileEnabled: true, profileProactiveQuestions: true, profileQuestionCooldownHours: 168
 };
 
 // Accept HTTPS providers and explicit loopback HTTP providers for local development.
@@ -31,6 +32,11 @@ function normalizeSettings(input = {}) {
   result.toolsEnabled = !!result.toolsEnabled;
   result.commandToolsEnabled = !!result.commandToolsEnabled;
   result.ttsEnabled = !!result.ttsEnabled;
+  result.profileEnabled = result.profileEnabled !== false;
+  result.profileProactiveQuestions = result.profileProactiveQuestions !== false;
+  const cooldown = Number(result.profileQuestionCooldownHours);
+  if (!Number.isFinite(cooldown) || cooldown < 1 || cooldown > 8760) throw new Error('用户档案主动询问冷却时间必须在 1～8760 小时之间。');
+  result.profileQuestionCooldownHours = Math.floor(cooldown);
   result.timeZone = String(result.timeZone || defaults.timeZone);
   try { new Intl.DateTimeFormat('zh-CN', { timeZone: result.timeZone }).format(); }
   catch { throw new Error('时区无效，请填写 Asia/Shanghai 等 IANA 时区。'); }

@@ -12,6 +12,7 @@ const { Storage } = require('./storage');
 const { MemoryService } = require('./memory-service');
 const { ChatService } = require('./chat-service');
 const persona = fs.readFileSync(path.join(__dirname, 'prompts/baizi.md'), 'utf8') + '\n\n' +
+  fs.readFileSync(path.join(__dirname, 'prompts/user-profile.md'), 'utf8') + '\n\n' +
   fs.readFileSync(path.join(__dirname, 'skills/pet-actions/SKILL.md'), 'utf8');
 
 // Limit request size before parsing client data.
@@ -31,6 +32,7 @@ async function createGateway({ token, settings, dataDir, legacyHistory = [], wor
   let config = normalizeSettings(settings);
   const temporaryDir = !dataDir ? fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'baizi-gateway-test-')) : null;
   const storage = await Storage.open(dataDir || temporaryDir, legacyHistory);
+  storage.setProfileProactiveEnabled(config.profileEnabled && config.profileProactiveQuestions);
   const memory = new MemoryService(storage, () => config);
   const chat = new ChatService(storage, persona, memory, { workspaceRoot });
   let active = null;
@@ -50,6 +52,7 @@ async function createGateway({ token, settings, dataDir, legacyHistory = [], wor
       const body = req.method === 'POST' ? await readJson(req) : {};
       if (req.url === '/configure' && req.method === 'POST') {
         config = normalizeSettings(body);
+        storage.setProfileProactiveEnabled(config.profileEnabled && config.profileProactiveQuestions);
         if (!config.autoMemory) memory.pause(); else memory.kick();
         return respond({ ok: true });
       }
@@ -65,7 +68,11 @@ async function createGateway({ token, settings, dataDir, legacyHistory = [], wor
           active?.abort(); await chat.settle();
           return respond(req.url === '/session/new' ? storage.newSession() : storage.selectSession(String(body.id || '')));
         }
-        if (req.url === '/memories') return respond({ memories: storage.memories() });
+      if (req.url === '/memories') return respond({ memories: storage.memories() });
+      if (req.url === '/profile') return respond(storage.userProfileStatus());
+      if (req.url === '/profile/save') return respond(storage.updateUserProfile(body.fields, 'manual'));
+      if (req.url === '/profile/clear') return respond(storage.clearUserProfileField(String(body.field || '')));
+      if (req.url === '/profile/proactive') return respond(storage.setProfileProactiveEnabled(!!body.enabled));
         if (req.url === '/memory/save') return respond(storage.saveMemory(body));
         if (req.url === '/memory/delete') return respond(storage.deleteMemory(String(body.id || '')));
         if (req.url === '/memory/source') {

@@ -7,6 +7,23 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 
+/**
+ * Responsibility: Define the user profile contract shared by storage, tools and the management UI.
+ * Implementation: 1. Keep the editable fields finite and named. 2. Bound free text at the persistence boundary. 3. Keep age optional and numeric.
+ */
+const USER_PROFILE_FIELDS = Object.freeze({
+  display_name: { label: '姓名或昵称', type: 'string', maxLength: 80, priority: 2 },
+  preferred_address: { label: '希望的称呼', type: 'string', maxLength: 80, priority: 1 },
+  age: { label: '年龄', type: 'integer', min: 1, max: 120, priority: 6, optional: true },
+  occupation: { label: '职业或身份', type: 'string', maxLength: 120, priority: 4, optional: true },
+  location: { label: '所在城市或地区', type: 'string', maxLength: 120, priority: 5, optional: true },
+  timezone: { label: '时区', type: 'string', maxLength: 80, priority: 5, optional: true },
+  interests: { label: '兴趣', type: 'string', maxLength: 500, priority: 7, optional: true },
+  communication_preferences: { label: '沟通偏好', type: 'string', maxLength: 500, priority: 3 },
+  current_goals: { label: '近期目标', type: 'string', maxLength: 500, priority: 8, optional: true },
+  important_notes: { label: '希望记住的事项', type: 'string', maxLength: 700, priority: 9, optional: true }
+});
+
 class Storage {
   // Open the user's database and import legacy history only once.
   static async open(dataDir, legacyHistory = []) {
@@ -31,6 +48,10 @@ class Storage {
         CREATE TABLE IF NOT EXISTS jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, message_id INTEGER NOT NULL UNIQUE,
           revision INTEGER NOT NULL, status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
           error TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS user_profile (field TEXT PRIMARY KEY, value TEXT NOT NULL,
+          source TEXT NOT NULL, source_message_id INTEGER, updated_at INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS user_profile_changes (id INTEGER PRIMARY KEY AUTOINCREMENT, field TEXT NOT NULL,
+          operation TEXT NOT NULL, previous_value TEXT, next_value TEXT, source TEXT NOT NULL, created_at INTEGER NOT NULL);
       `);
       db.run("UPDATE jobs SET status='pending' WHERE status='running'");
       db.run("UPDATE messages SET status='interrupted' WHERE status='pending'");
@@ -46,7 +67,7 @@ class Storage {
         }
         storage.setMeta('legacy_imported', '1');
       }
-      storage.setMeta('schema_version', '1');
+      storage.setMeta('schema_version', '2');
     });
     return storage;
   }
@@ -196,6 +217,94 @@ class Storage {
     this.transaction(() => this.db.run(`UPDATE jobs SET status=?,error=?,attempts=attempts+? WHERE id=?`, [status, error, status === 'running' ? 1 : 0, id]));
   }
 
+  // Return the fixed profile fields in a stable shape; missing values remain empty strings.
+  userProfile() {
+    const rows = new Map(this.all('SELECT field,value,source,source_message_id,updated_at FROM user_profile').map(row => [row.field, row]));
+    const fields = {};
+    for (const [field, definition] of Object.entries(USER_PROFILE_FIELDS)) {
+      const row = rows.get(field);
+      fields[field] = { value: row?.value || '', label: definition.label, source: row?.source || '', sourceMessageId: row?.source_message_id || null,
+        updatedAt: row?.updated_at || null, optional: !!definition.optional, priority: definition.priority };
+    }
+    const missing = Object.entries(fields).filter(([, field]) => !field.value).map(([key]) => key);
+    const requiredMissing = Object.entries(fields).filter(([, field]) => !field.value && !field.optional).map(([key]) => key);
+    const optionalMissing = Object.entries(fields).filter(([, field]) => !field.value && field.optional).map(([key]) => key);
+    return { fields, missing, requiredMissing, optionalMissing, complete: missing.length === 0 };
+  }
+
+  // Validate and persist only user-profile fields explicitly supplied by the caller.
+  updateUserProfile(input, source = 'conversation', sourceMessageId = null) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('用户档案更新必须是对象。');
+    const entries = Object.entries(input);
+    if (!entries.length) throw new Error('没有可保存的用户档案字段。');
+    for (const [field, value] of entries) {
+      const definition = USER_PROFILE_FIELDS[field];
+      if (!definition) throw new Error(`用户档案字段不允许：${field}。`);
+      if (definition.type === 'integer') {
+        if (!Number.isInteger(value) || value < definition.min || value > definition.max) throw new Error(`${definition.label}必须是 ${definition.min}～${definition.max} 的整数。`);
+      } else if (typeof value !== 'string' || !value.trim() || value.length > definition.maxLength) {
+        throw new Error(`${definition.label}为空或超过 ${definition.maxLength} 个字符。`);
+      }
+    }
+    return this.transaction(() => {
+      const now = Date.now();
+      for (const [field, rawValue] of entries) {
+        const value = String(rawValue).trim();
+        const old = this.all('SELECT value FROM user_profile WHERE field=?', [field])[0];
+        this.db.run(`INSERT INTO user_profile(field,value,source,source_message_id,updated_at) VALUES (?,?,?,?,?)
+          ON CONFLICT(field) DO UPDATE SET value=excluded.value,source=excluded.source,source_message_id=excluded.source_message_id,updated_at=excluded.updated_at`,
+        [field, value, source, sourceMessageId, now]);
+        this.db.run('INSERT INTO user_profile_changes(field,operation,previous_value,next_value,source,created_at) VALUES (?,?,?,?,?,?)',
+          [field, old ? 'update' : 'create', old?.value || null, value, source, now]);
+      }
+      this.setMeta('profile_last_updated_at', now);
+      return { updated: entries.map(([field]) => field), profile: this.userProfile() };
+    });
+  }
+
+  // Clear one profile field while retaining an audit record; old conversation text cannot restore it automatically.
+  clearUserProfileField(field) {
+    if (!Object.hasOwn(USER_PROFILE_FIELDS, field)) throw new Error(`用户档案字段不允许：${field}。`);
+    return this.transaction(() => {
+      const old = this.all('SELECT value FROM user_profile WHERE field=?', [field])[0];
+      if (!old) return { ok: true, profile: this.userProfile() };
+      this.db.run('DELETE FROM user_profile WHERE field=?', [field]);
+      this.db.run('INSERT INTO user_profile_changes(field,operation,previous_value,next_value,source,created_at) VALUES (?,?,?,?,?,?)',
+        [field, 'clear', old.value, null, 'manual', Date.now()]);
+      return { ok: true, profile: this.userProfile() };
+    });
+  }
+
+  // Decide whether this turn may contain a gentle onboarding question and record the cooldown atomically.
+  prepareProfilePrompt(prompt, cooldownHours = 168) {
+    const profile = this.userProfile();
+    if (!profile.missing.length) return null;
+    if (this.meta('profile_proactive_enabled') === '0') return null;
+    const text = String(prompt || '').trim();
+    if (!text || /[?？]|^(请|帮我|查询|搜索|查一下|天气|运行|执行|打开|设置|修改|解释|总结|写|生成|翻译|代码|为什么|怎么|如何|能否|可以|现在|查看)/u.test(text)) return null;
+    const last = Number(this.meta('profile_last_prompt_at') || 0);
+    if (last && Date.now() - last < Math.max(1, Number(cooldownHours) || 168) * 3600_000) return null;
+    const field = profile.missing.slice().sort((a, b) => USER_PROFILE_FIELDS[a].priority - USER_PROFILE_FIELDS[b].priority)[0];
+    this.transaction(() => {
+      this.setMeta('profile_last_prompt_at', Date.now());
+      this.setMeta('profile_last_prompted_field', field);
+      this.setMeta('profile_prompt_count', Number(this.meta('profile_prompt_count') || 0) + 1);
+    });
+    return { field, label: USER_PROFILE_FIELDS[field].label };
+  }
+
+  // Expose profile metadata for the management view without exposing database internals.
+  userProfileStatus() {
+    const profile = this.userProfile();
+    return { ...profile, proactiveEnabled: this.meta('profile_proactive_enabled') !== '0', lastPromptAt: Number(this.meta('profile_last_prompt_at') || 0),
+      lastPromptedField: this.meta('profile_last_prompted_field') || '', promptCount: Number(this.meta('profile_prompt_count') || 0) };
+  }
+
+  // Update onboarding preferences without letting the model toggle them.
+  setProfileProactiveEnabled(enabled) {
+    return this.transaction(() => { this.setMeta('profile_proactive_enabled', enabled ? '1' : '0'); return this.userProfileStatus(); });
+  }
+
   // Validate job revision at commit time, then save all extracted facts atomically.
   applyJob(job, facts) {
     return this.transaction(() => {
@@ -211,7 +320,7 @@ class Storage {
   }
 
   // Export user-visible data without API credentials or internal database paths.
-  exportData() { return { version: 1, exportedAt: new Date().toISOString(), sessions: this.sessions().map(session => ({ ...session, messages: this.messages(session.id) })), memories: this.memories() }; }
+  exportData() { return { version: 2, exportedAt: new Date().toISOString(), sessions: this.sessions().map(session => ({ ...session, messages: this.messages(session.id) })), memories: this.memories(), userProfile: this.userProfileStatus() }; }
   close() { this.db.close(); }
 }
-module.exports = { Storage };
+module.exports = { Storage, USER_PROFILE_FIELDS };

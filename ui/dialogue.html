@@ -3,7 +3,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'">
 <title>白子 · 对话与记忆</title><link rel="stylesheet" href="dialogue.css"></head>
 <body><header><h1>对话与记忆</h1><p>白子的人设与记忆在本机管理，回复由你配置的模型 API 生成。</p></header>
-<nav><button data-tab="settings" class="selected">模型设置</button><button data-tab="memories">长期记忆</button><button data-tab="history">会话历史</button></nav>
+<nav><button data-tab="settings" class="selected">模型设置</button><button data-tab="profile">用户档案</button><button data-tab="memories">长期记忆</button><button data-tab="history">会话历史</button></nav>
 <p id="notice" role="status"></p>
 <section id="settings">
 <form id="settings-form">
@@ -19,12 +19,18 @@
 <label class="check"><input id="autoMemory" type="checkbox">自动提取值得长期记住的信息</label>
 <label class="check"><input id="toolsEnabled" type="checkbox">允许白子查询天气、搜索网页和控制动作</label>
 <label class="check"><input id="commandToolsEnabled" type="checkbox">允许只读命令诊断（在工具开关开启时生效）</label>
+<label class="check"><input id="profileEnabled" type="checkbox">在对话中使用本地用户档案</label>
+<label class="check"><input id="profileProactiveQuestions" type="checkbox">允许白子在合适时主动完善用户档案</label>
+<label>档案主动询问冷却（小时）<input id="profileQuestionCooldownHours" type="number" min="1" max="8760" required></label>
 <p class="hint">天气使用 Open-Meteo，搜索使用 DuckDuckGo；查询内容会发送给对应服务。命令诊断仅允许固定命令，结果会发送给模型。命令默认关闭，不读取文件正文、不执行项目脚本。</p>
 <label class="check"><input id="ttsEnabled" type="checkbox">使用 macOS 系统语音播报回复</label>
 <div class="grid"><label>系统声音<input id="ttsVoice" placeholder="Tingting"></label><label>语速（每分钟字数）<input id="ttsRate" type="number" min="80" max="400" required></label></div>
 <p class="hint">API Key 使用系统安全存储加密。选入上下文的对话和记忆会发送给模型供应商。</p>
 <div class="actions"><button type="submit">保存设置</button><button id="test-model" type="button">测试模型连接</button></div>
 </form></section>
+<section id="profile" hidden>
+<p class="hint">这些信息只保存在本机，用于让白子更自然地称呼你和记住沟通偏好。空白字段不会被猜测；年龄、位置等可选信息可以留空。</p>
+<p id="profile-status" class="muted"></p><div id="profile-list"></div></section>
 <section id="memories" hidden>
 <p class="hint">重要事实会在回复后自动提取。这里可以直接添加、纠正或删除；删除会阻止旧记录重新写入同一记忆。删除记忆不会删除聊天原文，旧会话仍可能提及；开启新会话后只会召回未删除的记忆。</p>
 <form id="memory-form"><input id="memoryId" type="hidden"><label>记忆主题<input id="memoryKey" maxlength="160" required placeholder="例如：称呼、饮食偏好、当前目标"></label><label>记忆内容<textarea id="memoryValue" maxlength="1000" required></textarea></label>

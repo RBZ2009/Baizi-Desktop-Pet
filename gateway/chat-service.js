@@ -37,7 +37,8 @@ class ChatService {
       let text = '';
       try {
         const inputBudget = settings.contextWindow - settings.maxOutputTokens - 1024;
-        let tools = settings.toolsEnabled === false ? [] : toolDefinitions.filter(tool => settings.commandToolsEnabled || tool.function.name !== 'run_command');
+        const profileTools = settings.profileEnabled === false ? [] : toolDefinitions.filter(tool => ['get_user_profile', 'update_user_profile'].includes(tool.function.name));
+        let tools = settings.toolsEnabled === false ? profileTools : toolDefinitions.filter(tool => settings.commandToolsEnabled || tool.function.name !== 'run_command');
         const schemaBytes = tools.length ? Buffer.byteLength(JSON.stringify(tools)) + 128 : 0;
         // Reserve room for tool definitions and results without crowding out the persona/current prompt.
         if (schemaBytes + 2048 + Buffer.byteLength(this.context.persona + prompt) > inputBudget) tools = [];
@@ -81,7 +82,8 @@ class ChatService {
               if (executedCalls >= 6) throw new Error('本轮工具次数已用完，请使用已有结果回答。');
               if (call.function.name === 'set_pet_action' && actionUsed) throw new Error('一次回复只允许一个动作。');
               executedCalls += 1;
-              output = await executeTool(call.function.name, call.function.arguments, { ...this.toolOptions, signal, timeZone: settings.timeZone });
+              output = await executeTool(call.function.name, call.function.arguments, { ...this.toolOptions, storage: this.storage,
+                sourceMessageId: turn.userId, signal, timeZone: settings.timeZone });
               if (signal.aborted) throw Object.assign(new Error('请求已取消。'), { name: 'AbortError' });
               if (call.function.name === 'set_pet_action') actionUsed = true;
               send({ type: 'tool', name: call.function.name, status: 'complete', ...(call.function.name === 'set_pet_action' ? { result: output } : {}) });

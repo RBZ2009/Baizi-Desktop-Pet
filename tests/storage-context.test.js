@@ -12,6 +12,7 @@ const { Storage } = require('../gateway/storage');
 const { ContextManager, tokenBound, retrieveMemories } = require('../gateway/context-manager');
 const { MemoryService, parseFacts } = require('../gateway/memory-service');
 const { normalizeSettings } = require('../gateway/settings');
+const { executeTool } = require('../gateway/tools/tool-registry');
 
 // Allocate a disposable real SQLite database for each scenario.
 async function fixture() {
@@ -155,4 +156,52 @@ test('malformed extraction is recorded as a retryable failure without saving inv
     assert.equal(f.storage.pendingJob().attempts, 1);
     assert.ok(f.storage.meta('last_memory_error'));
   } finally { service.stop(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.close(); }
+});
+
+test('user profile validates fixed fields, survives restart and records source', async () => {
+  const f = await fixture();
+  try {
+    const saved = f.storage.updateUserProfile({ display_name: '小明', preferred_address: '队长', age: 28 }, 'conversation', 42);
+    assert.deepEqual(saved.updated, ['display_name', 'preferred_address', 'age']);
+    assert.equal(saved.profile.fields.preferred_address.value, '队长');
+    assert.equal(saved.profile.fields.age.sourceMessageId, 42);
+    assert.throws(() => f.storage.updateUserProfile({ age: 0 }, 'manual'), /整数/);
+    assert.throws(() => f.storage.updateUserProfile({ unknown: '值' }, 'manual'), /不允许/);
+    f.storage.close(); f.storage = await Storage.open(f.root);
+    assert.equal(f.storage.userProfile().fields.display_name.value, '小明');
+    assert.equal(f.storage.userProfileStatus().fields.age.value, '28');
+    f.storage.clearUserProfileField('age');
+    assert.equal(f.storage.userProfileStatus().fields.age.value, '');
+  } finally { f.close(); }
+});
+
+test('profile prompting is gentle, explicit tasks bypass it and cooldown is durable', async () => {
+  const f = await fixture();
+  try {
+    const first = f.storage.prepareProfilePrompt('你好', 168);
+    assert.equal(first.field, 'preferred_address');
+    assert.equal(f.storage.prepareProfilePrompt('嗯，继续聊聊', 168), null);
+    assert.equal(f.storage.prepareProfilePrompt('现在几点？', 0), null);
+    f.storage.transaction(() => f.storage.setMeta('profile_last_prompt_at', '0'));
+    const next = f.storage.prepareProfilePrompt('继续', 1);
+    assert.equal(next.field, 'preferred_address');
+    f.storage.setProfileProactiveEnabled(false);
+    assert.equal(f.storage.prepareProfilePrompt('你好', 0), null);
+  } finally { f.close(); }
+});
+
+test('profile appears as data-only context and tools update only allowlisted fields', async () => {
+  const f = await fixture();
+  try {
+    const context = new ContextManager(f.storage, '你是白子。');
+    const result = await context.build(f.storage.currentSession().id, '你好', normalizeSettings({ contextWindow: 8192, maxOutputTokens: 1024 }), new AbortController().signal);
+    const system = result.messages.find(message => message.role === 'system').content;
+    assert.match(system, /用户档案/);
+    assert.match(system, /preferred_address/);
+    const updated = await executeTool('update_user_profile', JSON.stringify({ fields: { communication_preferences: '简洁回答' }, reason: '用户明确说希望简洁回答' }), { storage: f.storage, sourceMessageId: 9 });
+    assert.equal(updated.profile.fields.communication_preferences.value, '简洁回答');
+    const profile = await executeTool('get_user_profile', '{}', { storage: f.storage });
+    assert.equal(profile.fields.communication_preferences, '简洁回答');
+    await assert.rejects(executeTool('update_user_profile', JSON.stringify({ fields: { notes: '猜测' }, reason: '推测' }), { storage: f.storage }), /不允许/);
+  } finally { f.close(); }
 });

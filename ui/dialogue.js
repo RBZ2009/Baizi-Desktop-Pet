@@ -4,7 +4,7 @@
  */
 const api = window.dialogue;
 const notice = document.getElementById('notice');
-const fields = ['baseUrl', 'model', 'contextWindow', 'maxOutputTokens', 'temperature', 'memoryModel', 'ttsVoice', 'ttsRate', 'timeZone'];
+const fields = ['baseUrl', 'model', 'contextWindow', 'maxOutputTokens', 'temperature', 'memoryModel', 'ttsVoice', 'ttsRate', 'timeZone', 'profileQuestionCooldownHours'];
 
 // Display service errors without injecting HTML into the management page.
 function showNotice(text) { notice.textContent = text; }
@@ -14,7 +14,7 @@ async function loadSettings() {
   const settings = await api.getSettings();
   for (const key of fields) document.getElementById(key).value = settings[key];
   document.getElementById('timeoutSeconds').value = settings.requestTimeoutMs / 1000;
-  for (const key of ['autoMemory', 'toolsEnabled', 'commandToolsEnabled', 'ttsEnabled']) document.getElementById(key).checked = settings[key];
+  for (const key of ['autoMemory', 'toolsEnabled', 'commandToolsEnabled', 'ttsEnabled', 'profileEnabled', 'profileProactiveQuestions']) document.getElementById(key).checked = settings[key];
   document.getElementById('apiKey').placeholder = settings.hasApiKey ? '已保存 Key；留空保留' : '请输入 API Key';
   if (settings.settingsError) showNotice(settings.settingsError);
 }
@@ -24,7 +24,7 @@ document.getElementById('settings-form').addEventListener('submit', async event 
   event.preventDefault();
   try {
     const settings = Object.fromEntries(fields.map(key => [key, document.getElementById(key).value]));
-    for (const key of ['autoMemory', 'toolsEnabled', 'commandToolsEnabled', 'ttsEnabled', 'clearApiKey']) settings[key] = document.getElementById(key).checked;
+    for (const key of ['autoMemory', 'toolsEnabled', 'commandToolsEnabled', 'ttsEnabled', 'profileEnabled', 'profileProactiveQuestions', 'clearApiKey']) settings[key] = document.getElementById(key).checked;
     settings.apiKey = document.getElementById('apiKey').value;
     settings.requestTimeoutMs = Number(document.getElementById('timeoutSeconds').value) * 1000;
     await api.saveSettings(settings);
@@ -48,13 +48,31 @@ document.getElementById('test-model').addEventListener('click', async event => {
 // Switch panels using static DOM elements.
 document.querySelectorAll('[data-tab]').forEach(button => button.addEventListener('click', async () => {
   document.querySelectorAll('[data-tab]').forEach(item => item.classList.toggle('selected', item === button));
-  for (const id of ['settings', 'memories', 'history']) document.getElementById(id).hidden = id !== button.dataset.tab;
+  for (const id of ['settings', 'profile', 'memories', 'history']) document.getElementById(id).hidden = id !== button.dataset.tab;
   try {
+    if (button.dataset.tab === 'profile') await loadProfile();
     if (button.dataset.tab === 'memories') await loadMemories();
     if (button.dataset.tab === 'history') await loadHistory();
   } catch (error) { showNotice(error.message); }
 }));
 loadSettings().catch(error => showNotice(error.message));
+
+// Render the fixed profile schema with field-level save and clear actions.
+async function loadProfile() {
+  const result = await api.manage('profile');
+  const list = document.getElementById('profile-list'); list.replaceChildren();
+  document.getElementById('profile-status').textContent = `已填写 ${Object.values(result.fields).filter(field => field.value).length} 项；待完善 ${result.missing.length + result.optionalMissing.length} 项。${result.proactiveEnabled ? '主动完善已开启。' : '主动完善已关闭。'}`;
+  for (const [field, item] of Object.entries(result.fields)) {
+    const wrapper = document.createElement('div'); wrapper.className = 'card';
+    const label = document.createElement('label'); label.textContent = `${item.label}${item.optional ? '（可选）' : ''}`;
+    const input = document.createElement(item.label === '兴趣' || item.label === '沟通偏好' || item.label === '近期目标' || item.label === '希望记住的事项' ? 'textarea' : 'input');
+    input.value = item.value || ''; input.maxLength = field === 'age' ? 3 : 700; if (field === 'age') input.type = 'number';
+    const actions = document.createElement('div'); actions.className = 'actions';
+    actions.append(action('保存', async () => { const value = field === 'age' ? Number(input.value) : input.value.trim(); if (!value) throw new Error('请先填写内容。'); await api.manage('saveProfile', { fields: { [field]: value } }); await loadProfile(); showNotice('用户档案已保存。'); }));
+    actions.append(action('清空', async () => { await api.manage('clearProfile', { field }); await loadProfile(); showNotice('档案字段已清空。'); }));
+    wrapper.append(label, input, actions); list.append(wrapper);
+  }
+}
 
 // Build cards with DOM text nodes so model output and stored facts cannot execute script.
 function card(text) {

@@ -853,7 +853,8 @@ ipcMain.handle('gateway-status', event => { requireManagementSender(event); retu
 ipcMain.handle('gateway-manage', async (event, { action, payload } = {}) => {
   requireManagementSender(event);
   const routes = { test: '/test', sessions: '/sessions', history: '/history', newSession: '/session/new', selectSession: '/session/select',
-    memories: '/memories', saveMemory: '/memory/save', deleteMemory: '/memory/delete', memorySource: '/memory/source', retryMemory: '/memory/retry', export: '/export' };
+    memories: '/memories', saveMemory: '/memory/save', deleteMemory: '/memory/delete', memorySource: '/memory/source', retryMemory: '/memory/retry', export: '/export',
+    profile: '/profile', saveProfile: '/profile/save', clearProfile: '/profile/clear' };
   if (!routes[action]) throw new Error('不支持的管理操作。');
   if (['newSession', 'selectSession'].includes(action)) { activeDialogue?.controller.abort(); speechService.stop(); }
   const result = await getGateway().request(routes[action], payload || {});
